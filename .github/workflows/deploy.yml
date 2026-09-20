@@ -1,18 +1,21 @@
 name: Deploy
 
+# Mirrors the deploy workflow on the main cottoncandygenocide site: on every
+# commit to the deployment branch, SSH to the server, pull, rebuild and
+# restart the containers.
+
 on:
-  workflow_run:
-    workflows: [CI]
-    branches: [main]
-    types: [completed]
+  push:
+    branches:
+      - main
+      # Until `main` exists this is the branch actually carrying the app.
+      # Once you merge to main, this line can go.
+      - claude/eve-market-tracker-thami0
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Never deploy a red build. workflow_dispatch has no originating run, so
-    # the conclusion check is skipped for a manual deploy.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
@@ -24,8 +27,8 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin ${{ github.ref_name }}
+            git reset --hard origin/${{ github.ref_name }}
             docker compose build
             docker compose up -d --remove-orphans
             docker image prune -f

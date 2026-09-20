@@ -140,6 +140,8 @@ DATABASE_URL_TEST=postgresql://postgres:postgres@localhost:5432/womp_markets_tes
 
 ## Deployment
 
+Live at **https://womp.cottoncandygenocide.ca**.
+
 One image containing Postgres, the API and the built frontend, behind Caddy for automatic TLS:
 
 ```bash
@@ -147,8 +149,12 @@ cp .env.example .env    # set SITE_DOMAIN, LETSENCRYPT_EMAIL, POSTGRES_PASSWORD,
 docker compose up -d --build
 ```
 
-`.github/workflows/ci.yml` runs lint, tests and build on every push and pull request;
-`deploy.yml` deploys over SSH only after CI passes.
+Every commit to the deployment branch triggers `.github/workflows/deploy.yml`, which SSHes to the
+server, pulls and rebuilds — the same setup as the main cottoncandygenocide site. `ci.yml` runs
+lint, tests and build alongside it but does not gate the deploy.
+
+Full server setup, the GitHub secrets it needs and troubleshooting are in
+[docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Data retention
 
