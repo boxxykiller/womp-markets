@@ -1,0 +1,356 @@
+// womp-markets — EVE Online citadel market tracker.
+//
+// Conventions (carried over from the sister project, cottoncandygenocide):
+// - Every model carries id / created_date / updated_date where it's useful.
+// - Structure, order and character ids are plain `String`, not BigInt: Upwell
+//   structure ids and market order ids exceed Int32, but nothing here does
+//   arithmetic on them, so a string sidesteps BigInt serialization entirely.
+// - Prices and volumes are Float (DOUBLE PRECISION). ISK values here are
+//   displayed, aggregated and compared, never used for settlement, so the
+//   precision is ample and the arithmetic stays cheap.
+// - No DB-level foreign keys. Rows reference each other by natural key
+//   (structureId, typeId) which keeps the poller's bulk upserts simple and
+//   lets market data outlive the character that happened to read it.
+
+generator client {
+  provider      = "prisma-client-js"
+  // "native" covers local dev; debian-openssl-3.0.x covers the
+  // node:20-bookworm-slim runtime, whose OpenSSL target differs from the
+  // build stage's.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Identity
+// ─────────────────────────────────────────────────────────────────────────
+
+// One row per EVE character that has logged in. There is no separate User
+// table: a character *is* the account. `ownerKey` groups a main and its alts
+// (it defaults to the main's own characterId), so a group of alts shares one
+// identity without needing a second table.
+model EveCharacter {
+  id           String   @id @default(uuid())
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  characterId   String  @unique
+  characterName String
+  ownerKey      String
+
+  // Tokens. Only the reader character's token is actually used for polling,
+  // but every login stores its own so any allowed character can be promoted
+  // to reader without re-authing.
+  accessToken  String?
+  refreshToken String?
+  tokenType    String?
+  scopes       String?
+  expiresAt    DateTime?
+
+  // Affiliation, resolved from ESI at login and re-checked lazily. Drives
+  // the corporation/alliance allowlist.
+  corporationId        String?
+  corporationName      String?
+  allianceId           String?
+  allianceName         String?
+  affiliationCheckedAt DateTime?
+
+  role          String    @default("user") // user | admin
+  banned        Boolean   @default(false)
+  active        Boolean   @default(true)
+  isMain        Boolean   @default(false)
+  connectedAt   DateTime?
+  lastLoginAt   DateTime?
+  lastRefreshAt DateTime?
+
+  @@index([ownerKey])
+  @@index([corporationId])
+}
+
+// Short-lived OAuth state. cottoncandygenocide stores this as throwaway
+// `pending_*` rows in its connection table, which pollutes the character list
+// and leaks rows when a login is abandoned; a dedicated table with an
+// expiry is swept cheaply and never confused for a real character.
+model OAuthState {
+  id        String   @id @default(uuid())
+  nonce     String   @unique
+  mode      String   @default("login") // login | link
+  ownerKey  String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Static Data Export
+// ─────────────────────────────────────────────────────────────────────────
+
+// One row per ingested SDE build. `datasetCounts` records rows-per-dataset so
+// the Settings page can show what a build actually contained (and which
+// datasets failed to parse).
+model SdeMeta {
+  id            String   @id @default(uuid())
+  buildNumber   Int      @unique
+  releaseDate   DateTime
+  ingestedAt    DateTime @default(now())
+  datasetCounts Json
+}
+
+// Every dataset in an SDE release, stored identically: one row per record,
+// keyed by the record's own `_key`, with the remainder verbatim as JSON.
+// Deliberately generic — CCP adds and reshapes datasets between releases, and
+// a schema-per-dataset would need a migration every time. Item names and
+// market groups are resolved by joining against this at read time, so an SDE
+// update is picked up with no backfill.
+model SdeRecord {
+  id      String @id @default(uuid())
+  dataset String
+  key     String
+  data    Json
+
+  @@unique([dataset, key])
+  @@index([dataset])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Market sources
+// ─────────────────────────────────────────────────────────────────────────
+
+// A polled market. Normally one row: the citadel. `sourceType` also allows a
+// region source (keyed `region:<id>`) for items that only trade in a global
+// region, which needs no reader character since region orders are public.
+model MarketSource {
+  id           String   @id @default(uuid())
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  structureId String  @unique
+  sourceType  String  @default("structure") // structure | region
+  name        String?
+  systemId    Int?
+  systemName  String?
+  regionId    Int?
+  regionName  String?
+
+  // Resolved at poll time by id first, then by case-insensitive name — so a
+  // source can be configured before that character has ever logged in.
+  readerCharacterId   String?
+  readerCharacterName String?
+
+  enabled             Boolean @default(true)
+  isPrimary           Boolean @default(false)
+  pollIntervalMinutes Int     @default(15)
+  retentionDays       Int     @default(180)
+
+  lastPolledAt   DateTime?
+  lastPollStatus String    @default("pending") // pending | ok | error
+  lastPollError  String?
+  nextPollAt     DateTime?
+}
+
+// The current order book — one row per live order, replaced in place each
+// poll and deleted when an order leaves the book. History lives in
+// MarketOrderArchive / MarketOrderEvent / MarketDailyStat, never here.
+model MarketOrder {
+  id           String   @id @default(uuid())
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  structureId  String
+  orderId      String
+  typeId       Int
+  isBuyOrder   Boolean
+  price        Float
+  volumeRemain Float
+  volumeTotal  Float
+  minVolume    Float    @default(1)
+  range        String?
+  duration     Int?
+  issued       DateTime
+  locationId   String?
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+
+  @@unique([structureId, orderId])
+  @@index([structureId, typeId])
+}
+
+// The permanent record of every order that has ever left the book, written at
+// the moment it disappears. MarketOrder only mirrors the *current* book, so
+// this is what makes the order history durable. Never pruned by retention.
+model MarketOrderArchive {
+  id String @id @default(uuid())
+
+  structureId  String
+  orderId      String
+  typeId       Int
+  isBuyOrder   Boolean
+  price        Float
+  // Volume still unsold when the order vanished, and the volume it was
+  // originally listed at — together these give the fraction that traded.
+  volumeRemain Float
+  volumeTotal  Float
+  issued       DateTime
+  duration     Int?
+  firstSeenAt  DateTime
+  lastSeenAt   DateTime
+  removedAt    DateTime @default(now())
+  // filled | filled_estimated | cancelled | expired — mirrors the event that
+  // was emitted for the same disappearance.
+  endState     String
+
+  @@unique([structureId, orderId, removedAt])
+  @@index([structureId, typeId, removedAt])
+  @@index([structureId, removedAt])
+}
+
+// The live feed — one row per change detected between two consecutive polls.
+// "fill_estimated" covers an order that vanished early while it was still the
+// best price on its side: ESI confirms no fills at all for structures, so it
+// is inferred, and deliberately kept apart from observed partial fills.
+model MarketOrderEvent {
+  id String @id @default(uuid())
+
+  structureId String
+  typeId      Int
+  orderId     String?
+  isBuyOrder  Boolean?
+  // new | fill | fill_estimated | price_change | cancelled | expired
+  eventType   String
+  price       Float?
+  prevPrice   Float?
+  volume      Float?
+  occurredAt  DateTime @default(now())
+
+  @@index([structureId, typeId, occurredAt])
+  @@index([structureId, occurredAt])
+}
+
+// One row per source/item/UTC day. Confirmed volume comes from observed
+// partial fills; estimated volume from orders that vanished early while
+// best-priced. The two are never summed into one column — a caller that wants
+// the optimistic number adds them explicitly.
+model MarketDailyStat {
+  id           String   @id @default(uuid())
+  updated_date DateTime @updatedAt
+
+  structureId        String
+  typeId             Int
+  date               DateTime
+  unitsSoldConfirmed Float    @default(0)
+  unitsSoldEstimated Float    @default(0)
+  iskTradedConfirmed Float    @default(0)
+  iskTradedEstimated Float    @default(0)
+  lowSell            Float?
+  highBuy            Float?
+  endSellVolume      Float    @default(0)
+  endBuyVolume       Float    @default(0)
+  sellOrderCount     Int      @default(0)
+  buyOrderCount      Int      @default(0)
+  sampleCount        Int      @default(0)
+
+  @@unique([structureId, typeId, date])
+  @@index([structureId, date])
+}
+
+// The tracked list. Global by design — one shared watchlist with no user
+// column, so everyone sees the same items and the same minimums. Status and
+// restock quantity are computed at read time from the live book plus recent
+// daily stats, never stored here.
+model MarketWatchItem {
+  id           String   @id @default(uuid())
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+  created_by   String?
+
+  structureId    String
+  typeId         Int
+  itemName       String?
+  // A flat floor, and a dynamic one expressed in days of sales cover. The
+  // effective minimum is whichever is larger right now.
+  minQuantity    Float   @default(0)
+  minDaysCover   Float   @default(0)
+  // What to restock *to*. Defaults to the effective minimum when unset.
+  targetQuantity Float?
+  critical       Boolean @default(false)
+  notes          String?
+
+  @@unique([structureId, typeId])
+}
+
+// Point-in-time on-market quantity, recorded for tracked items only —
+// snapshotting all few-thousand listed items every poll would dwarf
+// everything else in the database for very little benefit.
+model MarketSnapshot {
+  id String @id @default(uuid())
+
+  structureId String
+  typeId      Int
+  sellVolume  Float    @default(0)
+  buyVolume   Float    @default(0)
+  bestSell    Float?
+  bestBuy     Float?
+  takenAt     DateTime @default(now())
+
+  @@index([structureId, typeId, takenAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Jita 4-4 reference prices
+// ─────────────────────────────────────────────────────────────────────────
+
+// Current Jita 4-4 (station 60003760) prices, refreshed on its own timer.
+// `source` records which provider actually answered, so the Settings page can
+// show when the fallback is carrying.
+model ReferencePrice {
+  id           String   @id @default(uuid())
+  updated_date DateTime @updatedAt
+
+  typeId     Int      @unique
+  bestBuy    Float?
+  bestSell   Float?
+  buyVolume  Float    @default(0)
+  sellVolume Float    @default(0)
+  medianBuy  Float?
+  medianSell Float?
+  source     String   @default("fuzzwork") // fuzzwork | esi
+  fetchedAt  DateTime @default(now())
+}
+
+// Jita daily history from ESI's region history endpoint, cached per
+// (typeId, date). Unlike structure markets, The Forge *does* publish real
+// history — this is stored rather than re-fetched so reports and charts can
+// join against it cheaply.
+model ReferenceDailyStat {
+  id String @id @default(uuid())
+
+  typeId     Int
+  date       DateTime
+  average    Float?
+  highest    Float?
+  lowest     Float?
+  volume     Float    @default(0)
+  orderCount Float    @default(0)
+  fetchedAt  DateTime @default(now())
+
+  @@unique([typeId, date])
+  @@index([typeId, date])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Misc
+// ─────────────────────────────────────────────────────────────────────────
+
+// Small key/value store for runtime configuration that belongs to the
+// deployment rather than the code: which source the first-run wizard picked,
+// when the SDE was last checked, and the outcome of that check.
+model AppSetting {
+  key          String   @id
+  value        Json
+  updated_date DateTime @updatedAt
+}

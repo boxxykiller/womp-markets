@@ -1,0 +1,7 @@
+{
+	email {$LETSENCRYPT_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+	reverse_proxy app:8080
+}

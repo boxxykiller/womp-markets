@@ -1,0 +1,36 @@
+services:
+  app:
+    build: .
+    image: womp-markets:latest
+    container_name: womp-markets-app
+    restart: unless-stopped
+    expose:
+      - "8080"
+    ports:
+      # Loopback only — Caddy is the public entrypoint.
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: womp-markets-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
