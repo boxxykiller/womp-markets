@@ -7,6 +7,31 @@ commit, pulls, rebuilds and restarts the containers.
 - **Server:** `155.138.213.76` (a different box from the main site, which is `155.138.201.89` —
   so this instance runs its own Caddy on 80/443 with no port conflict)
 
+## Fastest path: the Bootstrap workflow
+
+If you'd rather not run the server commands by hand, add the secrets below and
+run **Actions → Bootstrap server → Run workflow**. It SSHes in and does the whole
+one-time setup for you: installs Docker, clones the repo, writes `.env` from the
+secrets (generating `SESSION_SECRET` and `POSTGRES_PASSWORD` itself), builds,
+starts, and then verifies the site answers over HTTPS from the public internet.
+
+It is safe to re-run — it installs Docker only if missing, clones only if
+missing, and **never overwrites an existing `.env`** (doing so would rotate the
+database password and lock the app out of its own data).
+
+Secrets it reads, beyond the five deploy secrets:
+
+| Secret | Notes |
+|---|---|
+| `EVE_CLIENT_ID` / `EVE_CLIENT_SECRET` | from your EVE application |
+| `LETSENCRYPT_EMAIL` | for the certificate |
+| `ALLOWED_CORPORATION_IDS` | **set this**, or any EVE character can sign in |
+| `ALLOWED_ALLIANCE_IDS` | optional |
+| `ADMIN_CHARACTER_NAMES` | your character name |
+| `MARKET_STRUCTURE_ID` / `MARKET_READER_CHARACTER` | optional — otherwise use the first-run wizard |
+
+The manual equivalent of all of this is below, if you prefer to do it yourself.
+
 ## One-time server setup
 
 Everything below runs **on the server**, once. After this, deploys are automatic.
