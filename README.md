@@ -134,7 +134,7 @@ still works on a bare checkout.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
-npm --prefix server exec prisma db push
+(cd server && npx prisma db push)
 DATABASE_URL_TEST=postgresql://postgres:postgres@localhost:5432/womp_markets_test npm test
 ```
 

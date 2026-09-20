@@ -48,8 +48,13 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      # Run from server/, not the repo root with --prefix: `npm --prefix`
+      # changes which package's binaries resolve but NOT the working
+      # directory, so Prisma would look for ./prisma/schema.prisma at the
+      # root and fail with "Could not find Prisma Schema".
       - name: Push schema to the test database
-        run: npm --prefix server exec prisma db push -- --skip-generate
+        working-directory: server
+        run: npx prisma db push --skip-generate
 
       - name: Lint
         run: npm run lint
