@@ -114,16 +114,3 @@ done
 
 echo "==> Containers"
 docker compose ps
-
-P_PATH: ${{ secrets.DEPLOY_PATH }}
-P_BRANCH: ${{ inputs.branch }}
-E_ID: ${{ secrets.EVE_CLIENT_ID }}
-E_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
-_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
-RP_IDS: ${{ secrets.ALLOWED_CORPORATION_IDS }}
-LIANCE_IDS: ${{ secrets.ALLOWED_ALLIANCE_IDS }}
-MIN_NAMES: ${{ secrets.ADMIN_CHARACTER_NAMES }}
-RUCTURE_ID: ${{ secrets.MARKET_STRUCTURE_ID }}
-ADER_NAME: ${{ secrets.MARKET_READER_CHARACTER }}
-CAL_USER: ${{ secrets.LOCAL_ADMIN_USERNAME }}
-CAL_PASS: ${{ secrets.LOCAL_ADMIN_PASSWORD }}
