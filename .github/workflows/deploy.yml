@@ -10,7 +10,7 @@ on:
       - main
       # Until `main` exists this is the branch actually carrying the app.
       # Once you merge to main, this line can go.
-      - claude/eve-market-tracker-thami0
+      - main
   workflow_dispatch:
 
 jobs:

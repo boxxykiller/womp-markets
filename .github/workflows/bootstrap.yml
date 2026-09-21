@@ -15,7 +15,7 @@ on:
     inputs:
       branch:
         description: Branch to deploy
-        default: claude/eve-market-tracker-thami0
+        default: main
         required: true
 
 jobs:

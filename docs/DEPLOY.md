@@ -70,7 +70,7 @@ The path you choose here is what goes in `DEPLOY_PATH`.
 ```bash
 git clone https://github.com/boxxykiller/womp-markets.git /opt/womp-markets
 cd /opt/womp-markets
-git checkout claude/eve-market-tracker-thami0    # or main, once it exists
+git checkout main    # or main, once it exists
 ```
 
 For a private repo, either use a clone URL with a token or add a deploy key to the repository.
@@ -143,7 +143,7 @@ Repository → Settings → Secrets and variables → Actions. Same names as the
 ## How a deploy runs
 
 `.github/workflows/deploy.yml` fires on every push to `main` or
-`claude/eve-market-tracker-thami0`, and does:
+`main`, and does:
 
 ```bash
 cd $DEPLOY_PATH

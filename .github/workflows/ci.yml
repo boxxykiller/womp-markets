@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - claude/eve-market-tracker-thami0
+      - main
 
 jobs:
   check:
