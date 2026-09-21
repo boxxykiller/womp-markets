@@ -18,7 +18,7 @@ import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 import { MarketTable } from '@/components/market/MarketTable';
 import { ItemDetailSheet } from '@/components/market/ItemDetailSheet';
-import { formatISK, formatQty, formatRelative } from '@/lib/format';
+import { formatISK, formatQty, formatQtyCompact, formatRelative } from '@/lib/format';
 
 export default function Dashboard() {
   const [detailTypeId, setDetailTypeId] = useState(null);
@@ -130,8 +130,8 @@ export default function Dashboard() {
         />
         <StatCard
           title="Units on sale / wanted"
-          value={`${formatQty(book.sell.units)} / ${formatQty(book.buy.units)}`}
-          subtitle="sell qty / buy qty"
+          value={`${formatQtyCompact(book.sell.units)} / ${formatQtyCompact(book.buy.units)}`}
+          subtitle={`${formatQty(book.sell.units)} sell / ${formatQty(book.buy.units)} buy`}
           icon={Layers}
           variant="slate"
         />

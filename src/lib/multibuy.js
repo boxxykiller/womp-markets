@@ -24,6 +24,10 @@ export function formatMultibuy(items) {
     .join('\n');
 }
 
+// "Aurora M<TAB>725 / 500<TAB>179900.00 ISK". The target may be "—" (none set)
+// and the price may be "No data"; both are optional and discarded.
+const STOCK_LINE = /^(.*?)[\t ]+\d[\d,.]*\s*\/\s*(\d[\d,.]*|[—–-])?\s*(?:[\d,.]+\s*ISK|No data)?$/i;
+
 /**
  * Parses pasted text into { name, quantity } pairs.
  *
@@ -41,6 +45,16 @@ export function parseMultibuy(text) {
 
   const items = [];
   for (const line of lines) {
+    // Hangar/stock export: "Name<TAB>have / target<TAB>price ISK". The target
+    // is the quantity we want; the current stock and the price are ignored.
+    const stock = line.match(STOCK_LINE);
+    if (stock) {
+      const name = stock[1].trim();
+      const target = Number((stock[2] ?? '').replace(/[\s,.]/g, ''));
+      if (name) items.push({ name, quantity: Number.isFinite(target) ? target : 0 });
+      continue;
+    }
+
     // Split on the LAST tab or 2+ spaces, so item names containing spaces
     // (almost all of them) survive intact.
     const match = line.match(/^(.*?)[\t ]{1,}([\d.,\s]+)$/);

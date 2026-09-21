@@ -26,6 +26,16 @@ export function formatQty(value) {
   return Math.round(value).toLocaleString();
 }
 
+/** Compact quantity (144.4M, 2.1K) for stat cards where the full number won't fit. */
+export function formatQtyCompact(value) {
+  if (value == null || !Number.isFinite(value)) return EM_DASH;
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
+  return Math.round(value).toLocaleString();
+}
+
 /** A rate like 1.2k/day, kept to one decimal below a thousand. */
 export function formatRate(value) {
   if (value == null || !Number.isFinite(value)) return EM_DASH;

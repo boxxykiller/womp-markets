@@ -59,7 +59,8 @@ export function BulkPasteDialog({ open, onOpenChange, onDone }) {
           <DialogTitle className="text-white">Bulk add tracked items</DialogTitle>
           <DialogDescription className="text-slate-400">
             One item per line, name then quantity — the same format EVE&apos;s multibuy accepts. The quantity becomes the
-            item&apos;s minimum stock level.
+            item&apos;s minimum stock level. Stock-export lines (<span className="font-mono">name&nbsp;&nbsp;have / target&nbsp;&nbsp;price</span>)
+            also work: the target becomes the minimum, and the current stock and ISK price are ignored.
           </DialogDescription>
         </DialogHeader>
 

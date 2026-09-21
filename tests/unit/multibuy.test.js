@@ -95,3 +95,22 @@ describe('parseMultibuy', () => {
     ]);
   });
 });
+
+describe('parseMultibuy — stock export lines', () => {
+  it('takes the target after the slash and ignores stock and ISK price', () => {
+    expect(parseMultibuy('Aurora M\t725 / 500\t179900.00 ISK')).toEqual([{ name: 'Aurora M', quantity: 500 }]);
+  });
+
+  it('copes with names ending in digits', () => {
+    expect(parseMultibuy('Navy Cap Booster 150\t2466 / 500\t45000.00 ISK')).toEqual([
+      { name: 'Navy Cap Booster 150', quantity: 500 },
+    ]);
+  });
+
+  it('treats a missing target and "No data" price as quantity 0', () => {
+    expect(parseMultibuy('Explosive Armor Hardener II\t30 / —\t1800000.00 ISK\nBadger\t0 / 10\tNo data')).toEqual([
+      { name: 'Explosive Armor Hardener II', quantity: 0 },
+      { name: 'Badger', quantity: 10 },
+    ]);
+  });
+});
