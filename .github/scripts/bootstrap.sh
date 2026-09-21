@@ -1,0 +1,129 @@
+set -eu
+
+
+echo "==> Checking Docker"
+if ! command -v docker > /dev/null 2>&1; then
+  echo "Installing Docker..."
+  curl -fsSL https://get.docker.com | sh
+else
+  echo "Docker already present: $(docker --version)"
+fi
+
+echo "==> Checking repository at $APP_PATH"
+if [ ! -d "$APP_PATH/.git" ]; then
+  echo "Cloning..."
+  mkdir -p "$(dirname "$APP_PATH")"
+  git clone https://github.com/boxxykiller/womp-markets.git "$APP_PATH"
+fi
+
+cd "$APP_PATH"
+git fetch origin "$APP_BRANCH"
+git checkout -B "$APP_BRANCH" "origin/$APP_BRANCH"
+git reset --hard "origin/$APP_BRANCH"
+
+echo "==> Checking .env"
+if [ -f .env ]; then
+  # Never regenerate: SESSION_SECRET and POSTGRES_PASSWORD are
+  # already baked into live sessions and the existing database
+  # cluster. Rewriting them would sign everyone out and lock the
+  # app out of its own data.
+  echo ".env already exists — leaving it untouched."
+else
+  echo "Creating .env with freshly generated secrets..."
+  PGPW="$(openssl rand -hex 24)"
+  SESSION="$(openssl rand -hex 32)"
+
+  # Quoted heredoc delimiter: the shell does no expansion, so the
+  # values are written literally and never echoed.
+  {
+    echo "EVE_CLIENT_ID=$EVE_ID"
+    echo "EVE_CLIENT_SECRET=$EVE_SECRET"
+    echo "EVE_REDIRECT_URI=https://womp.cottoncandygenocide.ca/EveCallback"
+    echo ""
+    echo "MARKET_STRUCTURE_ID=$STRUCTURE_ID"
+    echo "MARKET_READER_CHARACTER=$READER_NAME"
+    echo "MARKET_POLL_INTERVAL_MINUTES=15"
+    echo "MARKET_RETENTION_DAYS=180"
+    echo ""
+    echo "ALLOWED_CORPORATION_IDS=$CORP_IDS"
+    echo "ALLOWED_ALLIANCE_IDS=$ALLIANCE_IDS"
+    echo "ADMIN_CHARACTER_NAMES=$ADMIN_NAMES"
+    echo ""
+    echo "JITA_PRICE_SOURCE=fuzzwork"
+    echo "JITA_REFRESH_INTERVAL_MINUTES=20"
+    echo "SDE_CHECK_INTERVAL_HOURS=12"
+    echo ""
+    echo "PORT=8080"
+    echo "NODE_ENV=production"
+    echo "SESSION_SECRET=$SESSION"
+    echo ""
+    echo "SITE_DOMAIN=womp.cottoncandygenocide.ca"
+    echo "LETSENCRYPT_EMAIL=$LE_EMAIL"
+    echo ""
+    echo "POSTGRES_DB=womp_markets"
+    echo "POSTGRES_USER=postgres"
+    echo "POSTGRES_PASSWORD=$PGPW"
+    echo "DATABASE_URL=postgresql://postgres:$PGPW@localhost:5432/womp_markets"
+    echo ""
+    # The dev bypass is enabled only when a password is actually
+    # supplied, so it can never be switched on with a blank or
+    # default credential. Useful for a first deploy before the EVE
+    # application exists, since otherwise there is no way into the
+    # UI at all. Turn it off once SSO works.
+    if [ -n "${LOCAL_PASS:-}" ]; then
+      echo "ENABLE_LOCAL_ADMIN_LOGIN=true"
+      echo "LOCAL_ADMIN_USERNAME=${LOCAL_USER:-admin}"
+      echo "LOCAL_ADMIN_PASSWORD=$LOCAL_PASS"
+    else
+      echo "ENABLE_LOCAL_ADMIN_LOGIN=false"
+    fi
+  } > .env
+  chmod 600 .env
+  echo ".env created."
+fi
+
+# An open allowlist means any EVE character on Tranquility can sign
+# in. Warn loudly rather than letting it pass unnoticed.
+if ! grep -qE '^ALLOWED_(CORPORATION|ALLIANCE)_IDS=.+' .env; then
+  echo "::warning::No corporation or alliance allowlist is set — ANY EVE character can sign in."
+fi
+if grep -q '^ENABLE_LOCAL_ADMIN_LOGIN=true' .env; then
+  echo "::warning::Local admin login is ENABLED (password bypass). Turn it off once EVE SSO works."
+fi
+if ! grep -qE '^EVE_CLIENT_ID=.+' .env; then
+  echo "::notice::No EVE credentials configured — SSO sign-in will report that it is not set up."
+fi
+
+echo "==> Building and starting"
+docker compose up -d --build --remove-orphans
+docker image prune -f
+
+echo "==> Waiting for the app to answer"
+for i in $(seq 1 60); do
+  if curl -fsS --max-time 5 http://127.0.0.1:8080/api/health > /dev/null 2>&1; then
+    echo "App healthy after ${i}s"
+    break
+  fi
+  if [ "$i" = "60" ]; then
+    echo "::error::App did not become healthy within 60s. Recent logs:"
+    docker compose logs --tail 60 app
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "==> Containers"
+docker compose ps
+
+P_PATH: ${{ secrets.DEPLOY_PATH }}
+P_BRANCH: ${{ inputs.branch }}
+E_ID: ${{ secrets.EVE_CLIENT_ID }}
+E_SECRET: ${{ secrets.EVE_CLIENT_SECRET }}
+_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+RP_IDS: ${{ secrets.ALLOWED_CORPORATION_IDS }}
+LIANCE_IDS: ${{ secrets.ALLOWED_ALLIANCE_IDS }}
+MIN_NAMES: ${{ secrets.ADMIN_CHARACTER_NAMES }}
+RUCTURE_ID: ${{ secrets.MARKET_STRUCTURE_ID }}
+ADER_NAME: ${{ secrets.MARKET_READER_CHARACTER }}
+CAL_USER: ${{ secrets.LOCAL_ADMIN_USERNAME }}
+CAL_PASS: ${{ secrets.LOCAL_ADMIN_PASSWORD }}
