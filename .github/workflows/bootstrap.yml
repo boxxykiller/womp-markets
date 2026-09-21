@@ -38,6 +38,20 @@ jobs:
           script: |
             set -eu
 
+            # sshd here rejects SetEnv, so `envs:` never arrives; export inline.
+            export APP_PATH='${{ secrets.DEPLOY_PATH }}'
+            export APP_BRANCH='${{ inputs.branch }}'
+            export EVE_ID='${{ secrets.EVE_CLIENT_ID }}'
+            export EVE_SECRET='${{ secrets.EVE_CLIENT_SECRET }}'
+            export LE_EMAIL='${{ secrets.LETSENCRYPT_EMAIL }}'
+            export CORP_IDS='${{ secrets.ALLOWED_CORPORATION_IDS }}'
+            export ALLIANCE_IDS='${{ secrets.ALLOWED_ALLIANCE_IDS }}'
+            export ADMIN_NAMES='${{ secrets.ADMIN_CHARACTER_NAMES }}'
+            export STRUCTURE_ID='${{ secrets.MARKET_STRUCTURE_ID }}'
+            export READER_NAME='${{ secrets.MARKET_READER_CHARACTER }}'
+            export LOCAL_USER='${{ secrets.LOCAL_ADMIN_USERNAME }}'
+            export LOCAL_PASS='${{ secrets.LOCAL_ADMIN_PASSWORD }}'
+
             echo "==> Checking Docker"
             if ! command -v docker > /dev/null 2>&1; then
               echo "Installing Docker..."
