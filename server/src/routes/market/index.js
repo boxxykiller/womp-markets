@@ -245,11 +245,26 @@ async function getMarketOverview({ structureId } = {}) {
   if (!source) return { source: null, sources: [] };
 
   const sources = await prisma.marketSource.findMany({ orderBy: [{ isPrimary: 'desc' }, { created_date: 'asc' }] });
-  const [listedTypes, watchCount, orderCount] = await Promise.all([
+  const [listedTypes, watchCount, orderCount, bookRows] = await Promise.all([
     prisma.marketOrder.findMany({ where: { structureId: source.structureId }, select: { typeId: true }, distinct: ['typeId'] }),
     prisma.marketWatchItem.count({ where: { structureId: source.structureId } }),
     prisma.marketOrder.count({ where: { structureId: source.structureId } }),
+    // Whole-book totals in one grouped query: order count, units and ISK
+    // value (price x remaining volume) per side.
+    prisma.$queryRaw`
+      SELECT "isBuyOrder" AS is_buy,
+             COUNT(*)::int AS orders,
+             COALESCE(SUM("volumeRemain"), 0)::float8 AS units,
+             COALESCE(SUM("volumeRemain" * "price"), 0)::float8 AS isk
+      FROM "MarketOrder"
+      WHERE "structureId" = ${source.structureId}
+      GROUP BY "isBuyOrder"
+    `,
   ]);
+  const side = (isBuy) => {
+    const r = bookRows.find((x) => x.is_buy === isBuy);
+    return { orders: r?.orders ?? 0, units: r?.units ?? 0, isk: r?.isk ?? 0 };
+  };
 
   const oldestStat = await prisma.marketDailyStat.findFirst({
     where: { structureId: source.structureId },
@@ -274,6 +289,7 @@ async function getMarketOverview({ structureId } = {}) {
     sources: sources.map((s) => ({ id: s.id, structureId: s.structureId, name: s.name, isPrimary: s.isPrimary })),
     distinctItems: listedTypes.length,
     orderCount,
+    book: { sell: side(false), buy: side(true) },
     trackedCount: watchCount,
     // How much history actually exists, so the UI can caveat young numbers
     // rather than presenting a three-day average as a monthly one.

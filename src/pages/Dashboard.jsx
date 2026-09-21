@@ -1,13 +1,24 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Boxes, Database, LayoutDashboard, PackageX, TrendingUp } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  Boxes,
+  Database,
+  Layers,
+  LayoutDashboard,
+  PackageX,
+  ShoppingCart,
+  Tag,
+  TrendingUp,
+} from 'lucide-react';
 import { api } from '@/api/client';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 import { MarketTable } from '@/components/market/MarketTable';
 import { ItemDetailSheet } from '@/components/market/ItemDetailSheet';
-import { formatISK, formatRelative } from '@/lib/format';
+import { formatISK, formatQty, formatRelative } from '@/lib/format';
 
 export default function Dashboard() {
   const [detailTypeId, setDetailTypeId] = useState(null);
@@ -33,6 +44,13 @@ export default function Dashboard() {
   const counts = watchlist?.counts ?? { out: 0, critical: 0, low: 0, ok: 0 };
   const needsAttention = (watchlist?.rows ?? []).filter((r) => r.status !== 'ok').slice(0, 10);
   const movers = (velocity?.rows ?? []).slice(0, 8);
+
+  const book = overview?.book ?? { sell: { orders: 0, units: 0, isk: 0 }, buy: { orders: 0, units: 0, isk: 0 } };
+  // Divide by the history that actually exists (capped at the 7-day window)
+  // so a young install isn't understated by dividing a day of sales by seven.
+  const velocityDays = Math.max(1, Math.min(7, overview?.dataCoverageDays ?? 1));
+  const iskPerDay = (velocity?.summary?.totalIsk ?? 0) / velocityDays;
+  const unitsPerDay = (velocity?.summary?.totalUnits ?? 0) / velocityDays;
 
   if (!overview?.source) {
     return (
@@ -91,6 +109,37 @@ export default function Dashboard() {
           value={formatISK(velocity?.summary?.totalIsk ?? 0)}
           subtitle={`${overview.dataCoverageDays} days of history`}
           icon={TrendingUp}
+          variant="violet"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <StatCard
+          title="Sell orders value"
+          value={formatISK(book.sell.isk)}
+          subtitle={`${book.sell.orders.toLocaleString()} orders`}
+          icon={Tag}
+          variant="emerald"
+        />
+        <StatCard
+          title="Buy orders value"
+          value={formatISK(book.buy.isk)}
+          subtitle={`${book.buy.orders.toLocaleString()} orders`}
+          icon={ShoppingCart}
+          variant="blue"
+        />
+        <StatCard
+          title="Units on sale / wanted"
+          value={`${formatQty(book.sell.units)} / ${formatQty(book.buy.units)}`}
+          subtitle="sell qty / buy qty"
+          icon={Layers}
+          variant="slate"
+        />
+        <StatCard
+          title="ISK moving per day"
+          value={formatISK(iskPerDay)}
+          subtitle={`${formatQty(Math.round(unitsPerDay))} units/day, ${velocityDays}-day avg`}
+          icon={Activity}
           variant="violet"
         />
       </div>
