@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCart } from '@/hooks/useCart';
 import { cn } from '@/lib/utils';
 import icon from '@/assets/womp-icon.svg';
+import heroBg from '@/assets/womp-bg-hero.svg';
 
 // A flat top nav rather than a sidebar: there are six destinations, and the
 // tables on every page want the full window width.
@@ -67,7 +68,10 @@ export default function Layout({ children }) {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#080E1A]">
+    <div
+      className="flex flex-col min-h-screen bg-[#080E1A] bg-cover bg-center bg-no-repeat bg-fixed"
+      style={{ backgroundImage: `url(${heroBg})` }}
+    >
       <header className="fixed top-0 left-0 right-0 z-50 border-b border-[#1E2D45]/70 bg-[#080E1A]/90 backdrop-blur-xl">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6">
           <div className="h-14 flex items-center justify-between gap-4">
