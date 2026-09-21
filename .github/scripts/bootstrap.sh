@@ -50,7 +50,6 @@ else
     echo "ADMIN_CHARACTER_NAMES=$ADMIN_NAMES"
     echo ""
     echo "JITA_PRICE_SOURCE=fuzzwork"
-    echo "JITA_REFRESH_INTERVAL_MINUTES=20"
     echo "SDE_CHECK_INTERVAL_HOURS=12"
     echo ""
     echo "PORT=8080"

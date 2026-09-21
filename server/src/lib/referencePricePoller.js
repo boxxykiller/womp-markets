@@ -1,5 +1,7 @@
 // Keeps Jita 4-4 reference prices current, so every local price can be shown
-// next to what the same item costs at the main trade hub.
+// next to what the same item costs at the main trade hub. Refreshed after each
+// successful market source poll (see marketPoller.js), and on demand from
+// Settings.
 //
 // Two providers, because neither alone is good enough:
 //
@@ -28,7 +30,6 @@ const FUZZWORK_URL = 'https://market.fuzzwork.co.uk/aggregates/';
 // any sane length limit while still making the request count negligible.
 const FUZZWORK_CHUNK_SIZE = 200;
 
-let refreshTimer = null;
 let refreshInProgress = false;
 
 export function chunk(items, size) {
@@ -227,17 +228,3 @@ export async function runReferenceRefresh() {
   }
 }
 
-export function startReferencePricePoller() {
-  if (refreshTimer) return;
-  const minutes = Number(process.env.JITA_REFRESH_INTERVAL_MINUTES) || 20;
-
-  // Offset from boot so this doesn't collide with the first market poll.
-  setTimeout(() => runReferenceRefresh().catch(() => {}), 30 * 1000);
-  refreshTimer = setInterval(() => runReferenceRefresh().catch(() => {}), minutes * 60 * 1000);
-  console.log(`[jita] reference price poller started — every ${minutes}m`);
-}
-
-export function stopReferencePricePoller() {
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = null;
-}

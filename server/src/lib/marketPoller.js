@@ -24,6 +24,7 @@
 import { prisma } from '../db/prisma.js';
 import { esiFetch, esiFetchPaged } from './esiClient.js';
 import { ensureFreshToken } from './eveSso.js';
+import { runReferenceRefresh } from './referencePricePoller.js';
 
 let pollTimer = null;
 let cleanupTimer = null;
@@ -404,6 +405,12 @@ export async function pollSource(id) {
     await applyDailyStats(source.structureId, now, aggByType, deltas);
     await recordWatchedSnapshots(source.structureId, aggByType, now);
     await markPollResult(source.id, 'ok', null, now, source.pollIntervalMinutes);
+
+    // Jita reference prices ride along with every successful market sync, so
+    // the comparison column is never older than the local data beside it.
+    // Not awaited: a slow or failing price provider must not delay or fail the
+    // poll (runReferenceRefresh never throws and skips if one is running).
+    runReferenceRefresh().catch(() => {});
 
     return { ok: true, orderCount: orders.length, eventCount: events.length, archivedCount: archives.length };
   } finally {

@@ -19,7 +19,6 @@ const authRouter = (await import('./routes/auth/index.js')).default;
 const functionsRouter = (await import('./routes/functions.js')).default;
 const sdeRouter = (await import('./routes/sde/index.js')).default;
 const { ensureConfiguredSource, startMarketPoller } = await import('./lib/marketPoller.js');
-const { startReferencePricePoller } = await import('./lib/referencePricePoller.js');
 const { startSdeScheduler } = await import('./lib/sdeScheduler.js');
 
 const app = express();
@@ -57,7 +56,6 @@ app.listen(PORT, () => {
 ensureConfiguredSource()
   .then(() => {
     startMarketPoller();
-    startReferencePricePoller();
     startSdeScheduler();
   })
   .catch((err) => console.error('[startup] background services failed to start:', err.message));
