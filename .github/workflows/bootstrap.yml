@@ -22,6 +22,7 @@ jobs:
   bootstrap:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Provision and start
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
