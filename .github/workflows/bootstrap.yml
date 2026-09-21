@@ -32,7 +32,7 @@ jobs:
           # Passed as environment variables rather than interpolated into the
           # script text, so their values are never assembled into a command
           # line that could surface in process listings or shell history.
-          envs: APP_PATH,APP_BRANCH,EVE_ID,EVE_SECRET,LE_EMAIL,CORP_IDS,ALLIANCE_IDS,ADMIN_NAMES,STRUCTURE_ID,READER_NAME
+          envs: APP_PATH,APP_BRANCH,EVE_ID,EVE_SECRET,LE_EMAIL,CORP_IDS,ALLIANCE_IDS,ADMIN_NAMES,STRUCTURE_ID,READER_NAME,LOCAL_USER,LOCAL_PASS
           script_stop: true
           command_timeout: 20m
           script: |
@@ -102,7 +102,18 @@ jobs:
                 echo "POSTGRES_PASSWORD=$PGPW"
                 echo "DATABASE_URL=postgresql://postgres:$PGPW@localhost:5432/womp_markets"
                 echo ""
-                echo "ENABLE_LOCAL_ADMIN_LOGIN=false"
+                # The dev bypass is enabled only when a password is actually
+                # supplied, so it can never be switched on with a blank or
+                # default credential. Useful for a first deploy before the EVE
+                # application exists, since otherwise there is no way into the
+                # UI at all. Turn it off once SSO works.
+                if [ -n "${LOCAL_PASS:-}" ]; then
+                  echo "ENABLE_LOCAL_ADMIN_LOGIN=true"
+                  echo "LOCAL_ADMIN_USERNAME=${LOCAL_USER:-admin}"
+                  echo "LOCAL_ADMIN_PASSWORD=$LOCAL_PASS"
+                else
+                  echo "ENABLE_LOCAL_ADMIN_LOGIN=false"
+                fi
               } > .env
               chmod 600 .env
               echo ".env created."
@@ -112,6 +123,12 @@ jobs:
             # in. Warn loudly rather than letting it pass unnoticed.
             if ! grep -qE '^ALLOWED_(CORPORATION|ALLIANCE)_IDS=.+' .env; then
               echo "::warning::No corporation or alliance allowlist is set — ANY EVE character can sign in."
+            fi
+            if grep -q '^ENABLE_LOCAL_ADMIN_LOGIN=true' .env; then
+              echo "::warning::Local admin login is ENABLED (password bypass). Turn it off once EVE SSO works."
+            fi
+            if ! grep -qE '^EVE_CLIENT_ID=.+' .env; then
+              echo "::notice::No EVE credentials configured — SSO sign-in will report that it is not set up."
             fi
 
             echo "==> Building and starting"
@@ -145,6 +162,8 @@ jobs:
           ADMIN_NAMES: ${{ secrets.ADMIN_CHARACTER_NAMES }}
           STRUCTURE_ID: ${{ secrets.MARKET_STRUCTURE_ID }}
           READER_NAME: ${{ secrets.MARKET_READER_CHARACTER }}
+          LOCAL_USER: ${{ secrets.LOCAL_ADMIN_USERNAME }}
+          LOCAL_PASS: ${{ secrets.LOCAL_ADMIN_PASSWORD }}
 
       - name: Check the site over HTTPS
         run: |
