@@ -179,3 +179,5 @@ automatically — the market history is only as durable as that volume:
 ```bash
 docker compose exec app pg_dump -U postgres womp_markets | gzip > womp-$(date +%F).sql.gz
 ```
+
+> Deploys run automatically on every push to `main`.
