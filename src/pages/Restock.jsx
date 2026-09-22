@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, ChevronDown, Copy, Package, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Copy, Package, RotateCcw, Search, Tags, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
@@ -186,7 +186,7 @@ export default function Restock() {
   // Those rows are all 0.00 in line-total view, which reads as "no price",
   // so they're hidden by default.
   const [hideZero, setHideZero] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(null); // 'multibuy' | 'prices' | null
 
   useEffect(() => {
     try {
@@ -258,18 +258,36 @@ export default function Restock() {
 
   const multibuyText = useMemo(() => formatMultibuy(items), [items]);
 
-  async function copyMultibuy() {
+  // "Item Name<TAB>price" per line: the Net Sell unit price — what to list
+  // each item at. Same items as the multibuy (quantity above 0), and plain
+  // numbers with no separators so it pastes cleanly into a spreadsheet.
+  const priceSheetText = useMemo(
+    () =>
+      rows
+        .filter(({ c }) => c.qty > 0 && c.unit.netSell > 0)
+        .map(({ item, c }) => `${String(item.itemName ?? `Type ${item.typeId}`).trim()}\t${c.unit.netSell.toFixed(2)}`)
+        .join('\n'),
+    [rows],
+  );
+
+  async function copyText(key, text, success) {
     try {
-      await navigator.clipboard.writeText(multibuyText);
-      setCopied(true);
-      toast.success('Multibuy copied — paste it into EVE');
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      toast.success(success);
+      setTimeout(() => setCopied(null), 2000);
     } catch {
-      // Clipboard access can be blocked outright; the text is in the
+      // Clipboard access can be blocked outright; the multibuy is in the
       // "Multibuy text" panel below to copy by hand.
-      toast.error('Could not copy automatically — open "Multibuy text" below and copy it manually.');
+      toast.error('Could not copy automatically — clipboard access is blocked in this browser.');
     }
   }
+
+  const copyMultibuy = () => copyText('multibuy', multibuyText, 'Multibuy copied — paste it into EVE');
+  const copyPriceSheet = () => {
+    if (!priceSheetText) return toast.error('No priced items with a quantity to copy.');
+    copyText('prices', priceSheetText, 'Price sheet copied — item name and Net Sell per unit');
+  };
 
   const header = (
     <PageHeader
@@ -284,9 +302,13 @@ export default function Restock() {
             <Trash2 className="w-4 h-4 mr-2" />
             Clear
           </Button>
+          <Button variant="outline" onClick={copyPriceSheet} className="border-slate-700 text-slate-300">
+            {copied === 'prices' ? <Check className="w-4 h-4 mr-2" /> : <Tags className="w-4 h-4 mr-2" />}
+            {copied === 'prices' ? 'Copied' : 'Copy price sheet'}
+          </Button>
           <Button onClick={copyMultibuy} className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white">
-            {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-            {copied ? 'Copied' : 'Copy multibuy'}
+            {copied === 'multibuy' ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+            {copied === 'multibuy' ? 'Copied' : 'Copy multibuy'}
           </Button>
         </>
       )}
