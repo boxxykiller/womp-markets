@@ -449,14 +449,20 @@ async function getMarketItem({ structureId, typeId, days = 90 } = {}) {
   };
 }
 
-async function getMarketFeed({ structureId, limit = 100, eventType } = {}) {
+async function getMarketFeed({ structureId, limit = 100, eventType, eventTypes } = {}) {
   const source = await resolveSource(structureId);
   if (!source) return { events: [] };
+
+  // `eventTypes` lets the dashboard ask for "trades only" (fill +
+  // fill_estimated) in one call; `eventType` stays for single-type callers.
+  const typeFilter = Array.isArray(eventTypes) && eventTypes.length
+    ? { eventType: { in: eventTypes.map(String) } }
+    : eventType ? { eventType } : {};
 
   const events = await prisma.marketOrderEvent.findMany({
     where: {
       structureId: source.structureId,
-      ...(eventType ? { eventType } : {}),
+      ...typeFilter,
     },
     orderBy: { occurredAt: 'desc' },
     take: Math.min(Number(limit) || 100, 500),

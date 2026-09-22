@@ -18,6 +18,7 @@ import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 import { MarketTable } from '@/components/market/MarketTable';
 import { ItemDetailSheet } from '@/components/market/ItemDetailSheet';
+import { LiveMarketFeed } from '@/components/market/LiveMarketFeed';
 import { formatISK, formatQty, formatQtyCompact, formatRelative } from '@/lib/format';
 
 export default function Dashboard() {
@@ -88,114 +89,125 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <StatCard
-          title="Needs attention"
-          value={counts.out + counts.critical}
-          subtitle={`${counts.out} out, ${counts.critical} critical`}
-          icon={AlertTriangle}
-          variant={counts.out + counts.critical > 0 ? 'rose' : 'emerald'}
-        />
-        <StatCard title="Low stock" value={counts.low} icon={PackageX} variant="amber" />
-        <StatCard
-          title="Tracked items"
-          value={overview.trackedCount}
-          subtitle={`of ${overview.distinctItems} listed`}
-          icon={Boxes}
-          variant="blue"
-        />
-        <StatCard
-          title="Traded (7d)"
-          value={formatISK(velocity?.summary?.totalIsk ?? 0)}
-          subtitle={`${overview.dataCoverageDays} days of history`}
-          icon={TrendingUp}
-          variant="violet"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <StatCard
-          title="Sell orders value"
-          value={formatISK(book.sell.isk)}
-          subtitle={`${book.sell.orders.toLocaleString()} orders`}
-          icon={Tag}
-          variant="emerald"
-        />
-        <StatCard
-          title="Buy orders value"
-          value={formatISK(book.buy.isk)}
-          subtitle={`${book.buy.orders.toLocaleString()} orders`}
-          icon={ShoppingCart}
-          variant="blue"
-        />
-        <StatCard
-          title="Units on sale / wanted"
-          value={`${formatQtyCompact(book.sell.units)} / ${formatQtyCompact(book.buy.units)}`}
-          subtitle={`${formatQty(book.sell.units)} sell / ${formatQty(book.buy.units)} buy`}
-          icon={Layers}
-          variant="slate"
-        />
-        <StatCard
-          title="ISK moving per day"
-          value={formatISK(iskPerDay)}
-          subtitle={`${formatQty(Math.round(unitsPerDay))} units/day, ${velocityDays}-day avg`}
-          icon={Activity}
-          variant="violet"
-        />
-      </div>
-
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-white">Running low</h2>
-          <Link to="/tracked" className="text-sm text-[#4A9EFF] hover:underline">
-            View all tracked
-          </Link>
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
+        <div className="min-w-0">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <StatCard
+            title="Needs attention"
+            value={counts.out + counts.critical}
+            subtitle={`${counts.out} out, ${counts.critical} critical`}
+            icon={AlertTriangle}
+            variant={counts.out + counts.critical > 0 ? 'rose' : 'emerald'}
+          />
+          <StatCard title="Low stock" value={counts.low} icon={PackageX} variant="amber" />
+          <StatCard
+            title="Tracked items"
+            value={overview.trackedCount}
+            subtitle={`of ${overview.distinctItems} listed`}
+            icon={Boxes}
+            variant="blue"
+          />
+          <StatCard
+            title="Traded (7d)"
+            value={formatISK(velocity?.summary?.totalIsk ?? 0)}
+            subtitle={`${overview.dataCoverageDays} days of history`}
+            icon={TrendingUp}
+            variant="violet"
+          />
         </div>
-        <MarketTable
-          rows={needsAttention}
-          isLoading={isLoading}
-          columns={['status', 'min', 'volume', 'cover']}
-          onRowClick={(row) => setDetailTypeId(row.typeId)}
-          emptyMessage="Everything tracked is above its minimum."
-        />
-      </section>
 
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-white">Fastest movers (7 days)</h2>
-          <Link to="/reports" className="text-sm text-[#4A9EFF] hover:underline">
-            All reports
-          </Link>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <StatCard
+            title="Sell orders value"
+            value={formatISK(book.sell.isk)}
+            subtitle={`${book.sell.orders.toLocaleString()} orders`}
+            icon={Tag}
+            variant="emerald"
+          />
+          <StatCard
+            title="Buy orders value"
+            value={formatISK(book.buy.isk)}
+            subtitle={`${book.buy.orders.toLocaleString()} orders`}
+            icon={ShoppingCart}
+            variant="blue"
+          />
+          <StatCard
+            title="Units on sale / wanted"
+            value={`${formatQtyCompact(book.sell.units)} / ${formatQtyCompact(book.buy.units)}`}
+            subtitle={`${formatQty(book.sell.units)} sell / ${formatQty(book.buy.units)} buy`}
+            icon={Layers}
+            variant="slate"
+          />
+          <StatCard
+            title="ISK moving per day"
+            value={formatISK(iskPerDay)}
+            subtitle={`${formatQty(Math.round(unitsPerDay))} units/day, ${velocityDays}-day avg`}
+            icon={Activity}
+            variant="violet"
+          />
         </div>
-        <div className="border border-slate-800 rounded-lg divide-y divide-slate-800/70">
-          {movers.length === 0 && (
-            <div className="py-8 text-center text-slate-500 text-sm">
-              No sales recorded yet — the poller needs a little history first.
-            </div>
-          )}
-          {movers.map((m) => (
-            <button
-              key={m.typeId}
-              onClick={() => setDetailTypeId(m.typeId)}
-              className="flex items-center justify-between gap-3 w-full px-3 py-2 text-sm hover:bg-slate-900/50 transition-colors"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <img
-                  src={`https://images.evetech.net/types/${m.typeId}/icon?size=32`}
-                  alt=""
-                  className="w-6 h-6 rounded"
-                  loading="lazy"
-                />
-                <span className="text-slate-200 truncate">{m.itemName ?? `Type ${m.typeId}`}</span>
+
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-white">Running low</h2>
+            <Link to="/tracked" className="text-sm text-[#4A9EFF] hover:underline">
+              View all tracked
+            </Link>
+          </div>
+          <MarketTable
+            rows={needsAttention}
+            isLoading={isLoading}
+            columns={['status', 'min', 'volume', 'cover']}
+            onRowClick={(row) => setDetailTypeId(row.typeId)}
+            emptyMessage="Everything tracked is above its minimum."
+          />
+        </section>
+
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-white">Fastest movers (7 days)</h2>
+            <Link to="/reports" className="text-sm text-[#4A9EFF] hover:underline">
+              All reports
+            </Link>
+          </div>
+          <div className="border border-slate-800 rounded-lg divide-y divide-slate-800/70">
+            {movers.length === 0 && (
+              <div className="py-8 text-center text-slate-500 text-sm">
+                No sales recorded yet — the poller needs a little history first.
               </div>
-              <div className="flex items-center gap-6 shrink-0 tnum">
-                <span className="text-slate-400">{Math.round(m.unitsPerDay).toLocaleString()}/day</span>
-                <span className="text-emerald-400">{formatISK(m.isk)}</span>
-              </div>
-            </button>
-          ))}
+            )}
+            {movers.map((m) => (
+              <button
+                key={m.typeId}
+                onClick={() => setDetailTypeId(m.typeId)}
+                className="flex items-center justify-between gap-3 w-full px-3 py-2 text-sm hover:bg-slate-900/50 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <img
+                    src={`https://images.evetech.net/types/${m.typeId}/icon?size=32`}
+                    alt=""
+                    className="w-6 h-6 rounded"
+                    loading="lazy"
+                  />
+                  <span className="text-slate-200 truncate">{m.itemName ?? `Type ${m.typeId}`}</span>
+                </div>
+                <div className="flex items-center gap-6 shrink-0 tnum">
+                  <span className="text-slate-400">{Math.round(m.unitsPerDay).toLocaleString()}/day</span>
+                  <span className="text-emerald-400">{formatISK(m.isk)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
         </div>
-      </section>
+
+        <aside className="min-w-0">
+          <LiveMarketFeed
+            onItemClick={setDetailTypeId}
+            className="h-[600px] xl:h-[calc(100vh-7rem)] xl:sticky xl:top-6"
+          />
+        </aside>
+      </div>
 
       <ItemDetailSheet typeId={detailTypeId} open={!!detailTypeId} onOpenChange={(v) => !v && setDetailTypeId(null)} />
     </Page>
