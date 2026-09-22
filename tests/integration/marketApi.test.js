@@ -9,6 +9,7 @@ const describeDb = hasDb ? describe : describe.skip;
 let prisma;
 let marketHandlers;
 let REGISTRY;
+let reportHandlers;
 
 const STRUCTURE_ID = '1000000000002';
 const TRIT = 34;
@@ -71,6 +72,7 @@ describeDb('market read API', () => {
     ({ prisma } = await import('../../server/src/db/prisma.js'));
     ({ marketHandlers } = await import('../../server/src/routes/market/index.js'));
     ({ REGISTRY } = await import('../../server/src/routes/functions.js'));
+    ({ reportHandlers } = await import('../../server/src/routes/market/reports.js'));
 
     await seedType(TRIT, 'Tritanium');
     await seedType(PYE, 'Pyerite', 1858);
@@ -202,6 +204,32 @@ describeDb('market read API', () => {
     const { rows } = await marketHandlers.getMarketBrowse.fn({ structureId: STRUCTURE_ID, sort: 'daysOfCover' });
     expect(rows[0].typeId).toBe(TRIT);
     expect(rows[1].daysOfCover30).toBeNull();
+  });
+
+  describe('untracked item reports', () => {
+    it('ranks untracked sellers and leaves tracked items out', async () => {
+      await seedOrder({ orderId: 1, typeId: TRIT, isBuy: false, price: 6, remain: 1000 });
+      await seedOrder({ orderId: 2, typeId: PYE, isBuy: false, price: 12, remain: 1000 });
+      await seedDaily(TRIT, 1, 100);
+      await seedDaily(PYE, 1, 100);
+      await prisma.marketWatchItem.create({ data: { structureId: STRUCTURE_ID, typeId: PYE, itemName: 'Pyerite' } });
+
+      const { rows, summary } = await reportHandlers.reportUntrackedMovers.fn({ structureId: STRUCTURE_ID });
+      expect(rows.map((r) => r.typeId)).toEqual([TRIT]);
+      expect(rows[0].iskPerDay).toBe(600); // 100/day x 6
+      expect(summary.iskPerDay).toBe(600);
+    });
+
+    it('includes an untracked item that sold out, with a quantity to reach target cover', async () => {
+      // No orders left, but it sold 50/day — gone from the book, not from demand.
+      await seedDaily(TRIT, 1, 50);
+      await prisma.referencePrice.create({ data: { typeId: TRIT, bestSell: 5, source: 'fuzzwork' } });
+
+      const { rows, summary } = await reportHandlers.reportUntrackedLowStock.fn({ structureId: STRUCTURE_ID, targetDays: 10 });
+      expect(rows.map((r) => r.typeId)).toEqual([TRIT]);
+      expect(rows[0].restockQuantity).toBe(500); // 50/day x 10 days - 0 on market
+      expect(summary).toMatchObject({ soldOut: 1, estimatedCost: 2500 });
+    });
   });
 
   describe('watchlist write authorisation', () => {

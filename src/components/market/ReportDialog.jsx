@@ -63,6 +63,7 @@ const COLUMNS = {
   units: { label: 'Units', align: 'right', render: (r) => formatQty(r.units) },
   isk: { label: 'ISK', align: 'right', render: (r) => formatISK(r.isk) },
   perDay: { label: 'Per day', align: 'right', render: (r) => formatRate(r.unitsPerDay) },
+  iskPerDay: { label: 'Est. ISK/day', align: 'right', render: (r) => formatISK(r.iskPerDay) },
 };
 
 function toCsv(rows, columnKeys) {
@@ -227,8 +228,10 @@ export function ReportDialog({ report, open, onOpenChange }) {
     () =>
       rows.slice(0, 12).map((r) => ({
         name: (r.itemName ?? `#${r.typeId}`).slice(0, 18),
-        // Whatever the report's headline number is, charted for the top rows.
+        // The report's headline number, charted for the top rows — named by
+        // the report where it has one, otherwise the first field present.
         value:
+          (report?.chart ? r[report.chart] : null) ??
           r.restockQuantity ??
           r.iskTiedUp ??
           r.isk ??
@@ -236,7 +239,7 @@ export function ReportDialog({ report, open, onOpenChange }) {
           r.sellVolume ??
           0,
       })),
-    [rows],
+    [rows, report],
   );
 
   if (!report) return null;
@@ -323,6 +326,8 @@ export function ReportDialog({ report, open, onOpenChange }) {
               {data.summary?.estimatedCost != null && ` · est. ${formatISK(data.summary.estimatedCost)} to restock`}
               {data.summary?.iskTiedUp != null && ` · ${formatISK(data.summary.iskTiedUp)} tied up`}
               {data.summary?.totalIsk != null && ` · ${formatISK(data.summary.totalIsk)} traded`}
+              {data.summary?.iskPerDay != null && ` · ${formatISK(data.summary.iskPerDay)}/day moved`}
+              {!!data.summary?.soldOut && ` · ${data.summary.soldOut} sold out`}
             </div>
 
             {chartData.length > 0 && (
