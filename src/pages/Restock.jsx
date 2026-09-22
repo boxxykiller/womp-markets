@@ -25,6 +25,9 @@ const DEFAULTS = {
   sccSurcharge: 0.5,
   salesTax: 3.6,
   markupPct: 10,
+  // Buy side priced off Jita sell orders (buy now) instead of Jita buy
+  // orders (place an order and wait).
+  buyAtJitaSell: false,
 };
 
 function readSettings() {
@@ -58,11 +61,13 @@ function readSettings() {
 
 function calcItem(item, s) {
   const qty = item.quantity || 0;
-  const buy = item.jitaBestBuy ?? 0;
   const sell = item.jitaBestSell ?? 0;
+  const buy = s.buyAtJitaSell ? sell : (item.jitaBestBuy ?? 0);
   const m3 = item.volumePerUnit ?? 0;
 
-  const brokerBuy = buy * (s.buyBrokerFee / 100);
+  // Buying straight off sell orders is an instant purchase: no order is
+  // placed, so there's no broker fee.
+  const brokerBuy = s.buyAtJitaSell ? 0 : buy * (s.buyBrokerFee / 100);
   const freight = m3 * s.shippingRate;
   const collateralFee = sell * (s.collateralPct / 100);
   const netBuy = buy + brokerBuy + freight + collateralFee;
@@ -360,7 +365,7 @@ export default function Restock() {
         <StatCard
           title="Net Buy"
           value={formatISK(totals.netBuy)}
-          subtitle="Landed cost: Jita buy + fees + shipping"
+          subtitle={`Landed cost: Jita ${settings.buyAtJitaSell ? 'sell' : 'buy'} + fees + shipping`}
           variant="amber"
         />
         <StatCard
@@ -398,6 +403,37 @@ export default function Restock() {
           {/* Inputs */}
           <div className="lg:col-span-4 grid grid-cols-2 gap-x-3 gap-y-4 content-start">
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 -mb-2">
+              Buying
+            </div>
+            <label className="col-span-2 flex items-center justify-between gap-3 cursor-pointer">
+              <span>
+                <span className="block text-sm text-slate-200">Buy at Jita sell</span>
+                <span className="block text-xs text-slate-500">
+                  {settings.buyAtJitaSell
+                    ? 'Buying off sell orders now — no buy broker fee'
+                    : 'Placing buy orders at the Jita buy price'}
+                </span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.buyAtJitaSell}
+                onClick={() => set('buyAtJitaSell')(!settings.buyAtJitaSell)}
+                className={cn(
+                  'relative w-10 h-6 rounded-full shrink-0 transition-colors',
+                  settings.buyAtJitaSell ? 'bg-[#4A9EFF]' : 'bg-slate-700',
+                )}
+              >
+                <span
+                  className={cn(
+                    'absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform',
+                    settings.buyAtJitaSell && 'translate-x-4',
+                  )}
+                />
+              </button>
+            </label>
+
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 -mb-2 mt-1">
               Shipping
             </div>
             <CalcField label="Rate per m³" value={settings.shippingRate} onChange={set('shippingRate')} unit="ISK" step={50} />
@@ -420,8 +456,13 @@ export default function Restock() {
           {/* Breakdown */}
           <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
             <Receipt title="Buy side">
-              <Line label="Gross Buy" hint="Jita buy" value={totals.grossBuy} />
-              <Line label="Buy broker fee" hint={`${settings.buyBrokerFee}%`} value={totals.brokerBuy} sign="+" />
+              <Line label="Gross Buy" hint={settings.buyAtJitaSell ? 'Jita sell' : 'Jita buy'} value={totals.grossBuy} />
+              <Line
+                label="Buy broker fee"
+                hint={settings.buyAtJitaSell ? 'none on instant buys' : `${settings.buyBrokerFee}%`}
+                value={totals.brokerBuy}
+                sign="+"
+              />
               <Line
                 label="Freight"
                 hint={`${formatQty(totals.m3)} m³ × ${formatISK(settings.shippingRate, { decimals: 0 })}`}
@@ -588,8 +629,11 @@ export default function Restock() {
                     <td className="px-2 text-right tnum text-slate-500">
                       {item.volumePerUnit == null ? '—' : formatQty(perUnit ? item.volumePerUnit : c.m3)}
                     </td>
-                    <td className="px-2 text-right tnum text-slate-300" title={est.buy ?? formatISKFull(x.grossBuy)}>
-                      <Estimated note={est.buy}>{formatISK(x.grossBuy)}</Estimated>
+                    <td
+                      className="px-2 text-right tnum text-slate-300"
+                      title={(settings.buyAtJitaSell ? est.sell : est.buy) ?? formatISKFull(x.grossBuy)}
+                    >
+                      <Estimated note={settings.buyAtJitaSell ? est.sell : est.buy}>{formatISK(x.grossBuy)}</Estimated>
                     </td>
                     <td className="px-2 text-right tnum text-slate-300" title={est.sell ?? formatISKFull(x.grossSell)}>
                       <Estimated note={est.sell}>{formatISK(x.grossSell)}</Estimated>
