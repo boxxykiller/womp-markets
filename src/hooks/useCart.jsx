@@ -64,6 +64,20 @@ export function CartProvider({ children }) {
 
   const clear = useCallback(() => setItems([]), []);
 
+  // Re-points items at corrected type ids ({ fromId: toId }), merging into an
+  // existing entry for the target rather than leaving two rows for one item.
+  const remapTypes = useCallback((remap) => {
+    setItems((prev) => {
+      const byType = new Map();
+      for (const item of prev) {
+        const typeId = remap[item.typeId] ?? item.typeId;
+        const existing = byType.get(typeId);
+        byType.set(typeId, existing ? { ...existing, quantity: Math.max(existing.quantity, item.quantity) } : { ...item, typeId });
+      }
+      return [...byType.values()];
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       items,
@@ -72,9 +86,10 @@ export function CartProvider({ children }) {
       setQuantity,
       removeItem,
       clear,
+      remapTypes,
       has: (typeId) => items.some((i) => i.typeId === typeId),
     }),
-    [items, addItems, setQuantity, removeItem, clear],
+    [items, addItems, setQuantity, removeItem, clear, remapTypes],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

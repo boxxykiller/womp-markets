@@ -11,7 +11,7 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { pollSource } from '../../lib/marketPoller.js';
 import { cacheWrap } from '../../lib/cache.js';
 import { esiFetch, mapWithConcurrency } from '../../lib/esiClient.js';
-import { refreshReferencePrices } from '../../lib/referencePricePoller.js';
+import { fetchEsiPrice, refreshReferencePrices } from '../../lib/referencePricePoller.js';
 import {
   avgDailyVolume,
   buildDailyLookup,
@@ -589,6 +589,63 @@ async function packagedVolumes(ids) {
   return new Map(entries);
 }
 
+// For ids that aren't a published market type, the published market type
+// with the same name — the item they were meant to be. Bulk paste used to
+// resolve names without preferring market types, so a duplicate-named
+// non-market type could be tracked; it never has a price anywhere.
+async function marketTypeRemap(typeIds) {
+  if (typeIds.length === 0) return new Map();
+  const rows = await prisma.$queryRaw`
+    SELECT DISTINCT ON (bad."key") bad."key" AS from_id, good."key" AS to_id
+    FROM "SdeRecord" bad
+    JOIN "SdeRecord" good
+      ON good."dataset" = 'types'
+     AND lower(good."data"->'name'->>'en') = lower(bad."data"->'name'->>'en')
+     AND (good."data"->>'published')::boolean IS TRUE
+     AND good."data"->'marketGroupID' IS NOT NULL
+    WHERE bad."dataset" = 'types'
+      AND bad."key" = ANY(${typeIds.map(String)}::text[])
+      AND NOT (
+        COALESCE((bad."data"->>'published')::boolean, false)
+        AND bad."data"->'marketGroupID' IS NOT NULL
+      )
+    ORDER BY bad."key", good."key"::int
+  `;
+  return new Map(rows.map((r) => [Number(r.from_id), Number(r.to_id)]));
+}
+
+/**
+ * Points tracked items saved under a non-market duplicate at the real market
+ * type. Idempotent; run at startup. If the real type is already tracked in
+ * the same structure, the duplicate row is dropped rather than colliding.
+ */
+export async function repairWatchItemTypes() {
+  const watch = await prisma.marketWatchItem.findMany({ select: { id: true, structureId: true, typeId: true } });
+  const remap = await marketTypeRemap([...new Set(watch.map((w) => w.typeId))]);
+  if (remap.size === 0) return { fixed: 0, removed: 0 };
+
+  const tracked = new Set(watch.map((w) => `${w.structureId}:${w.typeId}`));
+  let fixed = 0;
+  let removed = 0;
+  for (const w of watch) {
+    const to = remap.get(w.typeId);
+    if (!to) continue;
+    if (tracked.has(`${w.structureId}:${to}`)) {
+      await prisma.marketWatchItem.delete({ where: { id: w.id } });
+      removed += 1;
+    } else {
+      await prisma.marketWatchItem.update({ where: { id: w.id }, data: { typeId: to } });
+      tracked.add(`${w.structureId}:${to}`);
+      fixed += 1;
+    }
+  }
+  if (fixed || removed) {
+    console.log(`[watchlist] repaired ${fixed} non-market type ids, removed ${removed} duplicates`);
+    primeJitaPrices([...new Set(remap.values())]);
+  }
+  return { fixed, removed };
+}
+
 // A price older than this is re-fetched when the Restock page asks for it.
 const QUOTE_MAX_AGE_MS = 10 * 60_000;
 const QUOTE_REFRESH_WAIT_MS = 15_000;
@@ -602,8 +659,13 @@ const QUOTE_REFRESH_WAIT_MS = 15_000;
  * fetched from Jita on the spot rather than waiting for the next poll.
  */
 async function getRestockQuotes({ typeIds } = {}) {
-  const ids = [...new Set((Array.isArray(typeIds) ? typeIds : []).map(Number).filter(Boolean))].slice(0, 500);
-  if (ids.length === 0) return { quotes: {} };
+  const requested = [...new Set((Array.isArray(typeIds) ? typeIds : []).map(Number).filter(Boolean))].slice(0, 500);
+  if (requested.length === 0) return { quotes: {} };
+
+  // Price the real market type for any non-market duplicate in the list.
+  const remap = await marketTypeRemap(requested);
+  const canonical = (id) => remap.get(id) ?? id;
+  const ids = [...new Set(requested.map(canonical))];
 
   const cutoff = Date.now() - QUOTE_MAX_AGE_MS;
   let prices = await referencePriceMap(ids);
@@ -624,10 +686,22 @@ async function getRestockQuotes({ typeIds } = {}) {
   }
 
   const [volumes, averages] = await Promise.all([packagedVolumes(ids), averagePrices()]);
+
+  // Last resort for anything still bare: ask ESI for that item directly.
+  // Only a handful by now, so it's quick, and it doesn't depend on the bulk
+  // refresh having landed.
+  const bare = ids.filter((id) => !prices.get(id)?.bestSell && !prices.get(id)?.bestBuy).slice(0, 25);
+  if (bare.length > 0) {
+    const direct = await mapWithConcurrency(bare, 5, (id) => fetchEsiPrice(id).catch(() => null));
+    for (const row of direct) if (row) prices.set(row.typeId, { ...row, fetchedAt: new Date() });
+  }
+
   const quotes = {};
-  for (const id of ids) {
+  for (const original of requested) {
+    const id = canonical(original);
     const p = prices.get(id);
-    quotes[id] = {
+    quotes[original] = {
+      resolvedTypeId: id !== original ? id : null,
       jitaBestBuy: p?.bestBuy ?? null,
       jitaBestSell: p?.bestSell ?? null,
       jitaFetchedAt: p?.fetchedAt ?? null,

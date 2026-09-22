@@ -53,9 +53,14 @@ app.listen(PORT, () => {
 // Background work starts after listen() so a database hiccup here can't stop
 // the HTTP server from coming up — a broken poller should still leave the UI
 // reachable to say so.
+const { repairWatchItemTypes } = await import('./routes/market/index.js');
+
 ensureConfiguredSource()
   .then(() => {
     startMarketPoller();
     startSdeScheduler();
+    // Tracked items saved under a non-market duplicate name never price;
+    // point them at the real item. Failing here mustn't stop anything else.
+    repairWatchItemTypes().catch((err) => console.error('[watchlist] type repair failed:', err.message));
   })
   .catch((err) => console.error('[startup] background services failed to start:', err.message));

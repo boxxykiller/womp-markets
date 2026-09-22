@@ -86,7 +86,17 @@ router.post(
         AND lower("data"->'name'->>'en') = ANY(${lowered}::text[])
     `;
 
-    const byLowerName = new Map(rows.map((r) => [String(r.data?.name?.en ?? '').toLowerCase(), flatten(r)]));
+    // Names aren't unique in the SDE: unpublished test hulls and non-market
+    // duplicates share them with the real item. Prefer the published market
+    // type, or the paste tracks a copy that has no market and never prices.
+    const rank = (t) => (t.published ? 2 : 0) + (t.marketGroupId != null ? 1 : 0);
+    const byLowerName = new Map();
+    for (const r of rows) {
+      const t = flatten(r);
+      const key = String(t.name ?? '').toLowerCase();
+      const current = byLowerName.get(key);
+      if (!current || rank(t) > rank(current)) byLowerName.set(key, t);
+    }
     const matched = [];
     const unmatched = [];
     for (const name of names) {
