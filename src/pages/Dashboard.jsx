@@ -21,25 +21,32 @@ import { ItemDetailSheet } from '@/components/market/ItemDetailSheet';
 import { LiveMarketFeed } from '@/components/market/LiveMarketFeed';
 import { formatISK, formatQty, formatQtyCompact, formatRelative } from '@/lib/format';
 
+// The dashboard is meant to be left open on a spare screen, so it keeps
+// refreshing when the tab is hidden or the window doesn't have focus.
+const REFRESH_MS = 60_000;
+
 export default function Dashboard() {
   const [detailTypeId, setDetailTypeId] = useState(null);
 
   const { data: overview } = useQuery({
     queryKey: ['market-overview'],
     queryFn: () => api.invoke('getMarketOverview', {}),
-    refetchInterval: 60_000,
+    refetchInterval: REFRESH_MS,
+    refetchIntervalInBackground: true,
   });
 
   const { data: watchlist, isLoading } = useQuery({
     queryKey: ['dashboard-watchlist'],
     queryFn: () => api.invoke('getMarketWatchlist', { sort: 'daysOfCover' }),
-    refetchInterval: 60_000,
+    refetchInterval: REFRESH_MS,
+    refetchIntervalInBackground: true,
   });
 
   const { data: velocity } = useQuery({
     queryKey: ['dashboard-velocity'],
     queryFn: () => api.invoke('reportVelocity', { days: 7 }),
-    refetchInterval: 60_000,
+    refetchInterval: REFRESH_MS,
+    refetchIntervalInBackground: true,
   });
 
   // Each query refreshes every minute on its own schedule. When the overview

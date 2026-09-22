@@ -26,15 +26,20 @@ export function LiveMarketFeed({ onItemClick, className }) {
   const seenIds = useRef(null);
   const [freshIds, setFreshIds] = useState(() => new Set());
 
-  const { data, dataUpdatedAt, isLoading, isError } = useQuery({
+  const { data, dataUpdatedAt, isLoading, isError, errorUpdatedAt } = useQuery({
     queryKey: ['dashboard-feed', mode],
     queryFn: () =>
       api.invoke('getMarketFeed', { limit: 100, ...(mode === 'trades' ? { eventTypes: TRADE_TYPES } : {}) }),
     refetchInterval: 60_000,
-    refetchIntervalInBackground: false,
+    // Keeps going when the tab is hidden: the dashboard is often left open as a wallboard.
+    refetchIntervalInBackground: true,
   });
 
   const events = data?.events ?? [];
+  // A failed refetch (the server restarting during a deploy, a dropped
+  // connection) shouldn't wipe a list that was fine a minute ago: keep the
+  // last good data and only flag it in the footer.
+  const staleAfterError = isError && !!data && errorUpdatedAt > dataUpdatedAt;
 
   // Relative timestamps ("3m ago") drift between refetches; re-render on a
   // light timer so they stay honest.
@@ -92,8 +97,10 @@ export function LiveMarketFeed({ onItemClick, className }) {
 
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin divide-y divide-slate-800/70">
         {isLoading && <div className="py-8 text-center text-slate-500 text-sm">Loading…</div>}
-        {isError && <div className="py-8 text-center text-rose-400 text-sm">Couldn&apos;t load the feed.</div>}
-        {!isLoading && !isError && events.length === 0 && (
+        {isError && !data && (
+          <div className="py-8 text-center text-rose-400 text-sm">Couldn&apos;t load the feed. Retrying every minute.</div>
+        )}
+        {data && events.length === 0 && (
           <div className="py-8 px-4 text-center text-slate-500 text-sm">
             <Radio className="w-5 h-5 mx-auto mb-2 text-slate-600" />
             {mode === 'trades' ? 'No trades observed yet.' : 'No market activity recorded yet.'}
@@ -148,7 +155,11 @@ export function LiveMarketFeed({ onItemClick, className }) {
       </div>
 
       <div className="px-3 py-1.5 border-t border-slate-800 text-[11px] text-slate-600">
-        Refreshes every minute{dataUpdatedAt ? ` · checked ${formatRelative(dataUpdatedAt)}` : ''}
+        {staleAfterError ? (
+          <span className="text-amber-400/80">Refresh failed, retrying · showing data from {formatRelative(dataUpdatedAt)}</span>
+        ) : (
+          <>Refreshes every minute{dataUpdatedAt ? ` · checked ${formatRelative(dataUpdatedAt)}` : ''}</>
+        )}
       </div>
     </section>
   );
