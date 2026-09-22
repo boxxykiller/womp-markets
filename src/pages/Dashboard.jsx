@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   AlertTriangle,
@@ -39,8 +39,23 @@ export default function Dashboard() {
   const { data: velocity } = useQuery({
     queryKey: ['dashboard-velocity'],
     queryFn: () => api.invoke('reportVelocity', { days: 7 }),
-    staleTime: 5 * 60_000,
+    refetchInterval: 60_000,
   });
+
+  // Each query refreshes every minute on its own schedule. When the overview
+  // shows that a new poll has finished, refresh the rest right away too, so
+  // the stat cards, tables and feed all switch to the new snapshot together.
+  const queryClient = useQueryClient();
+  const lastPolledAt = overview?.source?.lastPolledAt;
+  const prevPolledAt = useRef(lastPolledAt);
+  useEffect(() => {
+    if (prevPolledAt.current && lastPolledAt && lastPolledAt !== prevPolledAt.current) {
+      queryClient.invalidateQueries({ queryKey: ['dashboard-watchlist'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-velocity'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-feed'] });
+    }
+    prevPolledAt.current = lastPolledAt;
+  }, [lastPolledAt, queryClient]);
 
   const counts = watchlist?.counts ?? { out: 0, critical: 0, low: 0, ok: 0 };
   const needsAttention = (watchlist?.rows ?? []).filter((r) => r.status !== 'ok').slice(0, 10);
