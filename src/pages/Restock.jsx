@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Check, ChevronDown, Copy, Package, RotateCcw, Search, Tags, Trash2 } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import {
+  AlertTriangle, Check, ChevronDown, ClipboardPaste, Copy, Loader2, Package, RotateCcw, Search, Tags, Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
@@ -9,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCart } from '@/hooks/useCart';
 import { formatISK, formatISKFull, formatQty } from '@/lib/format';
-import { formatMultibuy } from '@/lib/multibuy';
+import { formatMultibuy, parseMultibuy } from '@/lib/multibuy';
 import { cn } from '@/lib/utils';
 
 // ── Calculator settings ──────────────────────────────────────────────────────
@@ -182,10 +184,104 @@ function Receipt({ title, children }) {
   );
 }
 
+/**
+ * The empty state doubles as an import: paste a multibuy (or a stock export)
+ * and it's priced like any list built from the Tracked page. Names that don't
+ * resolve are listed rather than dropped, so a typo doesn't quietly shrink
+ * the haul.
+ */
+function PasteList({ onAdd }) {
+  const [text, setText] = useState('');
+  const [unmatched, setUnmatched] = useState([]);
+
+  const resolve = useMutation({
+    mutationFn: async () => {
+      const parsed = parseMultibuy(text);
+      if (parsed.length === 0) throw new Error('Nothing to price — paste some lines first.');
+
+      // A bare name is one unit, as in EVE's own multibuy; repeated lines add up.
+      const qtyByName = new Map();
+      for (const p of parsed) {
+        const key = p.name.trim().toLowerCase();
+        qtyByName.set(key, (qtyByName.get(key) ?? 0) + (p.quantity > 0 ? p.quantity : 1));
+      }
+
+      const { matched, unmatched } = await api.sde.resolveNames([...new Set(parsed.map((p) => p.name.trim()))]);
+      return {
+        items: matched.map((m) => ({
+          typeId: m.typeId,
+          itemName: m.name,
+          quantity: qtyByName.get(m.name.toLowerCase()) ?? 1,
+        })),
+        unmatched,
+      };
+    },
+    onSuccess: ({ items, unmatched }) => {
+      setUnmatched(unmatched);
+      if (items.length === 0) return toast.error('None of those lines matched an item.');
+      onAdd(items);
+      toast.success(`Added ${items.length} item${items.length === 1 ? '' : 's'} to price`);
+      if (unmatched.length > 0) {
+        toast.warning(`${unmatched.length} line${unmatched.length === 1 ? '' : 's'} didn't match: ${unmatched.slice(0, 3).join(', ')}${unmatched.length > 3 ? '…' : ''}`);
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
+      <div className="text-center mb-5">
+        <Package className="w-8 h-8 text-slate-700 mx-auto mb-3" />
+        <p className="text-slate-400">Your restock list is empty.</p>
+        <p className="text-sm text-slate-600 mt-1">
+          Select items on the Tracked page and add them here — or paste a multibuy list below to price it.
+        </p>
+      </div>
+
+      <div className="max-w-2xl mx-auto">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={10}
+          spellCheck={false}
+          placeholder={'Tritanium\t1000000\nPyerite\t500000\nMedium Shield Extender II\t20'}
+          className="w-full rounded-lg bg-slate-950 border border-slate-800 p-3 text-sm text-slate-200 font-mono scrollbar-thin focus:outline-none focus:border-[#4A9EFF]"
+        />
+        {unmatched.length > 0 && (
+          <div className="mt-2 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3">
+            <div className="flex items-center gap-2 text-amber-400 text-sm font-medium mb-1">
+              <AlertTriangle className="w-4 h-4" />
+              {unmatched.length} line{unmatched.length === 1 ? '' : 's'} didn&apos;t match an item
+            </div>
+            <div className="text-xs text-amber-300/80 font-mono max-h-24 overflow-y-auto scrollbar-thin">
+              {unmatched.map((n, i) => (
+                <div key={i}>{n}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-3 mt-3">
+          <span className="text-xs text-slate-500">
+            One item per line, name then quantity. Stock-export lines use the target as the quantity.
+          </span>
+          <Button
+            onClick={() => resolve.mutate()}
+            disabled={resolve.isPending || !text.trim()}
+            className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white shrink-0"
+          >
+            {resolve.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ClipboardPaste className="w-4 h-4 mr-2" />}
+            Price this list
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Restock() {
-  const { items, setQuantity, removeItem, clear, remapTypes } = useCart();
+  const { items, addItems, setQuantity, removeItem, clear, remapTypes } = useCart();
   const [settings, setSettings] = useState(readSettings);
   const [perUnit, setPerUnit] = useState(false);
   const [filter, setFilter] = useState('');
@@ -337,13 +433,7 @@ export default function Restock() {
     return (
       <Page>
         {header}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-10 text-center">
-          <Package className="w-8 h-8 text-slate-700 mx-auto mb-3" />
-          <p className="text-slate-400">Your restock list is empty.</p>
-          <p className="text-sm text-slate-600 mt-1">
-            Select items on the Tracked page and add them here to build a restock list.
-          </p>
-        </div>
+        <PasteList onAdd={addItems} />
       </Page>
     );
   }
