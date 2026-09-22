@@ -17,12 +17,29 @@ import { cn } from '@/lib/utils';
 // re-typing a freight rate on every visit is exactly the friction to avoid.
 
 const SETTINGS_KEY = 'womp.restock.calc.v1';
-const DEFAULTS = { shippingRate: 650, collateralPct: 1, brokerFee: 3, salesTax: 3.6, markupPct: 10 };
+const DEFAULTS = {
+  shippingRate: 650,
+  collateralPct: 1,
+  buyBrokerFee: 3,
+  sellBrokerFee: 3,
+  sccSurcharge: 0.5,
+  salesTax: 3.6,
+  markupPct: 10,
+};
 
 function readSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...DEFAULTS, ...JSON.parse(raw) } : DEFAULTS;
+    if (!raw) return DEFAULTS;
+    const saved = JSON.parse(raw);
+    // Earlier versions had one broker fee for both sides; carry it over to
+    // each rather than silently resetting someone's number.
+    if (saved.brokerFee != null) {
+      saved.buyBrokerFee ??= saved.brokerFee;
+      saved.sellBrokerFee ??= saved.brokerFee;
+      delete saved.brokerFee;
+    }
+    return { ...DEFAULTS, ...saved };
   } catch {
     return DEFAULTS;
   }
@@ -30,32 +47,40 @@ function readSettings() {
 
 // ── Margin math ──────────────────────────────────────────────────────────────
 //
-// Buy side:  Net Buy  = Jita Buy + broker fee + shipping
+// Buy side:  Net Buy  = Jita Buy + buy broker fee + shipping
 //            shipping = m³ × rate  +  collateral fee (a % of the Jita Sell
 //            value, which is what a courier contract is collateralised at)
-// Sell side: Net Sell = Jita Sell + sell fees (tax + broker) + markup
+// Sell side: Net Sell = Jita Sell + sell broker fee + SCC surcharge
+//                       + sales tax + markup
 //            — the price to list at so fees are passed on and markup is kept
-// Profit:    what the listing actually returns after sell fees, less Net Buy
+// Profit:    what the listing actually returns after those sell-side fees
+//            are taken from it, less Net Buy
 
 function calcItem(item, s) {
   const qty = item.quantity || 0;
   const buy = item.jitaBestBuy ?? 0;
   const sell = item.jitaBestSell ?? 0;
   const m3 = item.volumePerUnit ?? 0;
-  const sellFeeRate = (s.salesTax + s.brokerFee) / 100;
+  const sellFeeRate = (s.sellBrokerFee + s.sccSurcharge + s.salesTax) / 100;
 
-  const brokerBuy = buy * (s.brokerFee / 100);
+  const brokerBuy = buy * (s.buyBrokerFee / 100);
   const freight = m3 * s.shippingRate;
   const collateralFee = sell * (s.collateralPct / 100);
   const netBuy = buy + brokerBuy + freight + collateralFee;
 
-  const sellFees = sell * sellFeeRate;
+  const brokerSell = sell * (s.sellBrokerFee / 100);
+  const scc = sell * (s.sccSurcharge / 100);
+  const tax = sell * (s.salesTax / 100);
+  const sellFees = brokerSell + scc + tax;
   const markup = sell * (s.markupPct / 100);
   const netSell = sell + sellFees + markup;
 
   const profit = netSell * (1 - sellFeeRate) - netBuy;
 
-  const unit = { grossBuy: buy, grossSell: sell, brokerBuy, freight, collateralFee, netBuy, sellFees, markup, netSell, profit };
+  const unit = {
+    grossBuy: buy, grossSell: sell, brokerBuy, freight, collateralFee, netBuy,
+    brokerSell, scc, tax, sellFees, markup, netSell, profit,
+  };
   const line = Object.fromEntries(Object.entries(unit).map(([k, v]) => [k, v * qty]));
   return { qty, m3: m3 * qty, collateral: sell * qty, unit, line, missing: item.jitaBestBuy == null || item.jitaBestSell == null };
 }
@@ -134,33 +159,45 @@ export default function Restock() {
 
   const set = (key) => (value) => setSettings((s) => ({ ...s, [key]: value }));
 
-  // Freight is charged on packaged volume; the stored SDE volume is the
-  // assembled size, which overstates ships roughly tenfold.
+  // Live Jita prices and packaged volume, rather than the snapshot stored when
+  // each item was added — that snapshot is often empty and always ages. The
+  // server fetches anything missing or stale from Jita on the spot. (Packaged
+  // volume matters because the SDE volume is the assembled size, which
+  // overstates ships roughly tenfold.)
   const typeIds = useMemo(() => items.map((i) => i.typeId).sort((a, b) => a - b), [items]);
-  const { data: packaged } = useQuery({
-    queryKey: ['packaged-volumes', typeIds],
-    queryFn: () => api.invoke('getPackagedVolumes', { typeIds }),
+  const { data: quoteData, isFetching: quotesLoading } = useQuery({
+    queryKey: ['restock-quotes', typeIds],
+    queryFn: () => api.invoke('getRestockQuotes', { typeIds }),
     enabled: typeIds.length > 0,
-    staleTime: Infinity,
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const rows = useMemo(
     () =>
       items.map((raw) => {
-        const volume = packaged?.volumes?.[raw.typeId];
-        const item = volume != null ? { ...raw, volumePerUnit: volume } : raw;
+        const q = quoteData?.quotes?.[raw.typeId];
+        const item = q
+          ? {
+              ...raw,
+              jitaBestBuy: q.jitaBestBuy ?? raw.jitaBestBuy,
+              jitaBestSell: q.jitaBestSell ?? raw.jitaBestSell,
+              volumePerUnit: q.volumePerUnit ?? raw.volumePerUnit,
+            }
+          : raw;
         return { item, c: calcItem(item, settings) };
       }),
-    [items, settings, packaged],
+    [items, settings, quoteData],
   );
 
   const totals = useMemo(() => {
-    const t = { units: 0, m3: 0, collateral: 0, missing: 0 };
-    for (const { c } of rows) {
+    const t = { units: 0, m3: 0, collateral: 0, missing: [] };
+    for (const { item, c } of rows) {
       t.units += c.qty;
       t.m3 += c.m3;
       t.collateral += c.collateral;
-      if (c.missing) t.missing += 1;
+      if (c.missing) t.missing.push(item.itemName ?? `Type ${item.typeId}`);
       for (const [k, v] of Object.entries(c.line)) t[k] = (t[k] ?? 0) + v;
     }
     t.marginPct = t.netBuy > 0 ? t.profit / t.netBuy : null;
@@ -225,7 +262,6 @@ export default function Restock() {
   }
 
   const v = (c) => (perUnit ? c.unit : c.line);
-  const sellFeePct = settings.salesTax + settings.brokerFee;
 
   return (
     <Page>
@@ -286,10 +322,16 @@ export default function Restock() {
             <CalcField label="Collateral fee" value={settings.collateralPct} onChange={set('collateralPct')} unit="%" step={0.1} />
 
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 -mb-2 mt-1">
-              Fees &amp; pricing
+              Market fees
             </div>
-            <CalcField label="Broker fee" value={settings.brokerFee} onChange={set('brokerFee')} unit="%" step={0.1} />
-            <CalcField label="Sales tax" value={settings.salesTax} onChange={set('salesTax')} unit="%" step={0.1} />
+            <CalcField label="Buy broker fee" value={settings.buyBrokerFee} onChange={set('buyBrokerFee')} unit="%" step={0.1} />
+            <CalcField label="Sell broker fee" value={settings.sellBrokerFee} onChange={set('sellBrokerFee')} unit="%" step={0.1} />
+            <CalcField label="SCC surcharge" value={settings.sccSurcharge} onChange={set('sccSurcharge')} unit="%" step={0.1} />
+            <CalcField label="Tax rate" value={settings.salesTax} onChange={set('salesTax')} unit="%" step={0.1} />
+
+            <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 -mb-2 mt-1">
+              Pricing
+            </div>
             <CalcField label="Markup" value={settings.markupPct} onChange={set('markupPct')} unit="%" step={0.5} />
           </div>
 
@@ -297,7 +339,7 @@ export default function Restock() {
           <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
             <Receipt title="Buy side">
               <Line label="Gross Buy" hint="Jita buy" value={totals.grossBuy} />
-              <Line label="Broker fee" hint={`${settings.brokerFee}%`} value={totals.brokerBuy} sign="+" />
+              <Line label="Buy broker fee" hint={`${settings.buyBrokerFee}%`} value={totals.brokerBuy} sign="+" />
               <Line
                 label="Freight"
                 hint={`${formatQty(totals.m3)} m³ × ${formatISK(settings.shippingRate, { decimals: 0 })}`}
@@ -315,7 +357,9 @@ export default function Restock() {
 
             <Receipt title="Sell side">
               <Line label="Gross Sell" hint="Jita sell" value={totals.grossSell} />
-              <Line label="Sell fees" hint={`${sellFeePct.toFixed(1)}% tax + broker`} value={totals.sellFees} sign="+" />
+              <Line label="Sell broker fee" hint={`${settings.sellBrokerFee}%`} value={totals.brokerSell} sign="+" />
+              <Line label="SCC surcharge" hint={`${settings.sccSurcharge}%`} value={totals.scc} sign="+" />
+              <Line label="Sales tax" hint={`${settings.salesTax}%`} value={totals.tax} sign="+" />
               <Line label="Markup" hint={`${settings.markupPct}%`} value={totals.markup} sign="+" />
               <Line label="Net Sell" value={totals.netSell} total tone="text-sky-400" />
               <Line
@@ -326,10 +370,13 @@ export default function Restock() {
               />
             </Receipt>
 
-            {totals.missing > 0 && (
+            {totals.missing.length > 0 && (
               <p className="md:col-span-2 text-xs text-amber-400/80">
-                {totals.missing} item{totals.missing === 1 ? ' has' : 's have'} no Jita price yet and count as zero.
-                Re-add from Tracked once prices refresh.
+                {quotesLoading && !quoteData
+                  ? 'Fetching Jita prices…'
+                  : `Jita has no buy or sell orders right now for ${totals.missing.slice(0, 5).join(', ')}${
+                      totals.missing.length > 5 ? ` and ${totals.missing.length - 5} more` : ''
+                    } — the empty side counts as zero.`}
               </p>
             )}
           </div>
@@ -431,7 +478,7 @@ export default function Restock() {
                     </td>
                     <td
                       className="px-2 text-right tnum text-sky-400"
-                      title={`${formatISKFull(x.netSell)} — fees ${formatISK(x.sellFees)}, markup ${formatISK(x.markup)}`}
+                      title={`${formatISKFull(x.netSell)} — broker ${formatISK(x.brokerSell)}, SCC ${formatISK(x.scc)}, tax ${formatISK(x.tax)}, markup ${formatISK(x.markup)}`}
                     >
                       {formatISK(x.netSell)}
                     </td>

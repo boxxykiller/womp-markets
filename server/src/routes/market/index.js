@@ -11,6 +11,7 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { pollSource } from '../../lib/marketPoller.js';
 import { cacheWrap } from '../../lib/cache.js';
 import { esiFetch, mapWithConcurrency } from '../../lib/esiClient.js';
+import { refreshReferencePrices } from '../../lib/referencePricePoller.js';
 import {
   avgDailyVolume,
   buildDailyLookup,
@@ -481,6 +482,16 @@ async function getMarketWatchlist({ structureId, search, status, marketGroupId, 
   return { rows, total: rows.length, counts, source: result.source };
 }
 
+// Newly tracked items would otherwise show no Jita price until the next
+// market poll triggers a reference refresh. Fire-and-forget: the save
+// shouldn't wait on Fuzzwork, and a failure just leaves it to that poll.
+function primeJitaPrices(typeIds) {
+  if (typeIds.length === 0) return;
+  refreshReferencePrices({ typeIds }).catch((err) =>
+    console.error(`[jita] priming ${typeIds.length} new types failed: ${err.message}`),
+  );
+}
+
 async function upsertMarketWatchItem(body = {}, req) {
   const { id, structureId, typeId, itemName, minQuantity, minDaysCover, targetQuantity, critical, notes } = body;
   if (!typeId) throw new HttpError(400, 'typeId required');
@@ -508,6 +519,7 @@ async function upsertMarketWatchItem(body = {}, req) {
         update: data,
       });
 
+  primeJitaPrices([item.typeId]);
   return { item };
 }
 
@@ -550,6 +562,7 @@ async function bulkAddMarketWatchItems({ structureId, items } = {}, req) {
       added += 1;
     }
   }
+  primeJitaPrices(items.map((it) => Number(it.typeId)).filter(Boolean));
   return { added, updated };
 }
 
@@ -559,8 +572,7 @@ async function bulkAddMarketWatchItems({ structureId, items } = {}, req) {
 // packaged_volume. Cached in-process: it changes only with a game patch.
 const PACKAGED_TTL_MS = 24 * 3600_000;
 
-async function getPackagedVolumes({ typeIds } = {}) {
-  const ids = [...new Set((Array.isArray(typeIds) ? typeIds : []).map(Number).filter(Boolean))].slice(0, 500);
+async function packagedVolumes(ids) {
   const entries = await mapWithConcurrency(ids, 10, async (id) => {
     try {
       const { data } = await cacheWrap(`packaged-volume:${id}`, PACKAGED_TTL_MS, async () => {
@@ -574,7 +586,53 @@ async function getPackagedVolumes({ typeIds } = {}) {
       return [id, null];
     }
   });
-  return { volumes: Object.fromEntries(entries) };
+  return new Map(entries);
+}
+
+// A price older than this is re-fetched when the Restock page asks for it.
+const QUOTE_MAX_AGE_MS = 10 * 60_000;
+
+/**
+ * Live Jita prices and packaged volume for the restock list.
+ *
+ * The list lives in the browser and keeps whatever prices an item had when it
+ * was added — often none, for an item added before the reference refresh had
+ * reached it. So the page asks here instead, and anything missing or stale is
+ * fetched from Jita on the spot rather than waiting for the next poll.
+ */
+async function getRestockQuotes({ typeIds } = {}) {
+  const ids = [...new Set((Array.isArray(typeIds) ? typeIds : []).map(Number).filter(Boolean))].slice(0, 500);
+  if (ids.length === 0) return { quotes: {} };
+
+  const cutoff = Date.now() - QUOTE_MAX_AGE_MS;
+  let prices = await referencePriceMap(ids);
+  const stale = ids.filter((id) => {
+    const p = prices.get(id);
+    return !p || new Date(p.fetchedAt).getTime() < cutoff;
+  });
+
+  if (stale.length > 0) {
+    try {
+      await refreshReferencePrices({ typeIds: stale });
+      prices = await referencePriceMap(ids);
+    } catch (err) {
+      // Serve what's stored; a provider outage shouldn't break the page.
+      console.error(`[restock] Jita refresh failed for ${stale.length} types: ${err.message}`);
+    }
+  }
+
+  const volumes = await packagedVolumes(ids);
+  const quotes = {};
+  for (const id of ids) {
+    const p = prices.get(id);
+    quotes[id] = {
+      jitaBestBuy: p?.bestBuy ?? null,
+      jitaBestSell: p?.bestSell ?? null,
+      jitaFetchedAt: p?.fetchedAt ?? null,
+      volumePerUnit: volumes.get(id) ?? null,
+    };
+  }
+  return { quotes };
 }
 
 async function pollMarketNow({ id, structureId } = {}) {
@@ -590,7 +648,7 @@ export const marketHandlers = {
   getMarketItem: { fn: getMarketItem, auth: 'auth' },
   getMarketFeed: { fn: getMarketFeed, auth: 'auth' },
   getMarketWatchlist: { fn: getMarketWatchlist, auth: 'auth' },
-  getPackagedVolumes: { fn: getPackagedVolumes, auth: 'auth' },
+  getRestockQuotes: { fn: getRestockQuotes, auth: 'auth' },
 
   // Managing the tracked list is admin-only. The UI hides these controls for
   // everyone else, but this is the boundary that actually enforces it.
