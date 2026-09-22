@@ -143,13 +143,15 @@ export default function Tracked() {
         typeId: r.typeId,
         itemName: r.itemName,
         // Default to what it takes to get back to target — the number
-        // someone opening the cart actually wants.
+        // someone opening the restock list actually wants.
         quantity: r.restockQuantity ?? 0,
         jitaBestSell: r.jitaBestSell,
+        jitaBestBuy: r.jitaBestBuy,
+        volumePerUnit: r.volumePerUnit,
         bestSell: r.bestSell,
       })),
     );
-    toast.success(`Added ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'} to cart`);
+    toast.success(`Added ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'} to restock list`);
     setSelected([]);
   }
 
@@ -205,7 +207,7 @@ export default function Tracked() {
           <div className="flex-1" />
           <Button size="sm" onClick={addSelectedToCart} className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white">
             <ShoppingCart className="w-4 h-4 mr-2" />
-            Add to cart
+            Add to restock
           </Button>
           {isAdmin && (
             <Button

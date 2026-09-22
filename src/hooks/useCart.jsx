@@ -1,10 +1,10 @@
-// The restock cart. Deliberately per-browser (localStorage) rather than a
+// The restock list. Deliberately per-browser (localStorage) rather than a
 // server table: it is one person's working selection on the way to a
 // multibuy paste, not shared state the whole corp should see change under
 // them.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-const STORAGE_KEY = 'womp.cart.v1';
+const STORAGE_KEY = 'womp.cart.v2';
 const CartContext = createContext(null);
 
 function readStored() {
@@ -43,6 +43,8 @@ export function CartProvider({ children }) {
           // and adding twice would over-buy.
           quantity: Math.max(0, Math.ceil(Number(item.quantity) || 0)),
           jitaBestSell: item.jitaBestSell ?? existing?.jitaBestSell ?? null,
+          jitaBestBuy: item.jitaBestBuy ?? existing?.jitaBestBuy ?? null,
+          volumePerUnit: item.volumePerUnit ?? existing?.volumePerUnit ?? null,
           bestSell: item.bestSell ?? existing?.bestSell ?? null,
         });
       }

@@ -16,7 +16,7 @@ const NAV = [
   { name: 'Tracked', path: '/tracked', icon: Boxes },
   { name: 'Browse', path: '/browse', icon: BarChart3 },
   { name: 'Reports', path: '/reports', icon: FileBarChart },
-  { name: 'Cart', path: '/cart', icon: ShoppingCart },
+  { name: 'Restock', path: '/restock', icon: ShoppingCart },
   { name: 'Settings', path: '/settings', icon: Settings },
 ];
 
@@ -59,7 +59,7 @@ export default function Layout({ children }) {
   });
   const attention = watchlist ? (watchlist.counts?.out ?? 0) + (watchlist.counts?.critical ?? 0) : 0;
 
-  const badgeFor = (item) => (item.name === 'Tracked' ? attention : item.name === 'Cart' ? cartCount : 0);
+  const badgeFor = (item) => (item.name === 'Tracked' ? attention : item.name === 'Restock' ? cartCount : 0);
   const isActive = (path) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path));
 
   async function handleLogout() {

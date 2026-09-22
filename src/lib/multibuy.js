@@ -3,7 +3,7 @@
 // client rejects the whole paste if a quantity has a thousands separator or a
 // decimal point, so the numbers here are always plain integers.
 //
-// Shared by the Cart's "copy multibuy" and by the Tracked page's bulk paste,
+// Shared by the Restock page's "copy multibuy" and by the Tracked page's bulk paste,
 // which parses the same format back — one format, one place.
 
 /** One multibuy line. Quantities are rounded up: a partial unit isn't buyable. */

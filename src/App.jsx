@@ -10,7 +10,7 @@ import Dashboard from '@/pages/Dashboard';
 import Tracked from '@/pages/Tracked';
 import Browse from '@/pages/Browse';
 import Reports from '@/pages/Reports';
-import Cart from '@/pages/Cart';
+import Restock from '@/pages/Restock';
 import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
 import EveCallback from '@/pages/EveCallback';
@@ -50,7 +50,7 @@ function AppRoutes() {
                 <Route path="/tracked" element={<Tracked />} />
                 <Route path="/browse" element={<Browse />} />
                 <Route path="/reports" element={<Reports />} />
-                <Route path="/cart" element={<Cart />} />
+                <Route path="/restock" element={<Restock />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

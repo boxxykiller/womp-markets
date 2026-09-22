@@ -302,6 +302,8 @@ export function ReportDialog({ report, open, onOpenChange }) {
                         itemName: r.itemName,
                         quantity: r.restockQuantity,
                         jitaBestSell: r.jitaBestSell,
+                        jitaBestBuy: r.jitaBestBuy,
+                        volumePerUnit: r.volumePerUnit,
                         bestSell: r.bestSell,
                       }));
                     if (items.length === 0) return toast.error('Nothing here needs restocking.');
@@ -311,7 +313,7 @@ export function ReportDialog({ report, open, onOpenChange }) {
                   className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white"
                 >
                   <ShoppingCart className="w-4 h-4 mr-2" />
-                  To cart
+                  To restock
                 </Button>
               )}
             </div>
