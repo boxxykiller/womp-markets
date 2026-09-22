@@ -29,6 +29,7 @@ const FUZZWORK_URL = 'https://market.fuzzwork.co.uk/aggregates/';
 // Fuzzwork accepts a long comma-separated list; 200 keeps the URL well under
 // any sane length limit while still making the request count negligible.
 const FUZZWORK_CHUNK_SIZE = 200;
+const FUZZWORK_TIMEOUT_MS = 20_000;
 
 let refreshInProgress = false;
 
@@ -73,7 +74,12 @@ export function parseFuzzworkEntry(typeId, entry) {
 
 export async function fetchFuzzworkChunk(typeIds, { fetchImpl = fetch } = {}) {
   const url = `${FUZZWORK_URL}?station=${JITA_STATION_ID}&types=${typeIds.join(',')}`;
-  const res = await fetchImpl(url, { headers: { Accept: 'application/json' } });
+  // A deadline so a stalled Fuzzwork falls through to ESI instead of hanging
+  // the whole refresh.
+  const res = await fetchImpl(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(FUZZWORK_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`Fuzzwork ${res.status}`);
 
   const body = await res.json();

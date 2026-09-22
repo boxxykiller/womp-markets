@@ -22,11 +22,17 @@ function buildHeaders(token, hasBody) {
   return headers;
 }
 
+// Every outbound call gets a deadline. Without one, a single connection that
+// never answers hangs its caller forever — and for the reference refresh that
+// means its in-progress flag never clears and no price refreshes again.
+export const ESI_TIMEOUT_MS = 30_000;
+
 export async function esiFetch(path, { token, method = 'GET', body, params } = {}) {
   const res = await fetch(buildUrl(path, params), {
     method,
     headers: buildHeaders(token, !!body),
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(ESI_TIMEOUT_MS),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -49,7 +55,7 @@ export async function esiFetchPaged(path, { token, params } = {}) {
     const url = buildUrl(path, params);
     url.searchParams.set('page', page);
 
-    const res = await fetch(url, { headers: buildHeaders(token, false) });
+    const res = await fetch(url, { headers: buildHeaders(token, false), signal: AbortSignal.timeout(ESI_TIMEOUT_MS) });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`ESI ${res.status} ${path}: ${text}`);

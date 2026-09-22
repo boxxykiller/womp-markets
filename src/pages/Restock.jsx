@@ -53,15 +53,13 @@ function readSettings() {
 // Sell side: Net Sell = Jita Sell + sell broker fee + SCC surcharge
 //                       + sales tax + markup
 //            — the price to list at so fees are passed on and markup is kept
-// Profit:    what the listing actually returns after those sell-side fees
-//            are taken from it, less Net Buy
+// Profit:    Net Sell − Net Buy
 
 function calcItem(item, s) {
   const qty = item.quantity || 0;
   const buy = item.jitaBestBuy ?? 0;
   const sell = item.jitaBestSell ?? 0;
   const m3 = item.volumePerUnit ?? 0;
-  const sellFeeRate = (s.sellBrokerFee + s.sccSurcharge + s.salesTax) / 100;
 
   const brokerBuy = buy * (s.buyBrokerFee / 100);
   const freight = m3 * s.shippingRate;
@@ -75,14 +73,51 @@ function calcItem(item, s) {
   const markup = sell * (s.markupPct / 100);
   const netSell = sell + sellFees + markup;
 
-  const profit = netSell * (1 - sellFeeRate) - netBuy;
+  const profit = netSell - netBuy;
 
   const unit = {
     grossBuy: buy, grossSell: sell, brokerBuy, freight, collateralFee, netBuy,
     brokerSell, scc, tax, sellFees, markup, netSell, profit,
   };
   const line = Object.fromEntries(Object.entries(unit).map(([k, v]) => [k, v * qty]));
-  return { qty, m3: m3 * qty, collateral: sell * qty, unit, line, missing: item.jitaBestBuy == null || item.jitaBestSell == null };
+  return { qty, m3: m3 * qty, collateral: sell * qty, unit, line, missing: item.jitaBestBuy == null && item.jitaBestSell == null };
+}
+
+/**
+ * Fills an item's Jita prices from the live quote, falling back per side.
+ *
+ * Roughly one item in seven has orders on only one side at Jita 4-4, and
+ * pricing the empty side at zero wrecks the margin. With no buy orders, the
+ * realistic restock cost is the Jita sell price (you'd buy off the sell
+ * orders); with no sell orders, CCP's universe-wide average stands in. Each
+ * fallback is flagged so the table can mark it as an estimate.
+ */
+function resolvePrices(raw, q) {
+  const buy = q?.jitaBestBuy ?? raw.jitaBestBuy ?? null;
+  const sell = q?.jitaBestSell ?? raw.jitaBestSell ?? null;
+  const avg = q?.averagePrice ?? null;
+
+  const item = {
+    ...raw,
+    jitaBestBuy: buy ?? sell ?? avg,
+    jitaBestSell: sell ?? avg ?? buy,
+    volumePerUnit: q?.volumePerUnit ?? raw.volumePerUnit,
+  };
+  const est = {
+    buy: buy == null && item.jitaBestBuy != null ? (sell != null ? 'No Jita buy orders — using Jita sell' : 'No Jita orders — using CCP average price') : null,
+    sell: sell == null && item.jitaBestSell != null ? (avg != null ? 'No Jita sell orders — using CCP average price' : 'No Jita sell orders — using Jita buy') : null,
+  };
+  return { item, est };
+}
+
+function Estimated({ note, children }) {
+  if (!note) return children;
+  return (
+    <span title={note} className="cursor-help">
+      <span className="text-amber-400/80 mr-0.5">≈</span>
+      {children}
+    </span>
+  );
 }
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
@@ -147,6 +182,10 @@ export default function Restock() {
   const [settings, setSettings] = useState(readSettings);
   const [perUnit, setPerUnit] = useState(false);
   const [filter, setFilter] = useState('');
+  // Adding a whole tracked list brings in every healthy item at quantity 0.
+  // Those rows are all 0.00 in line-total view, which reads as "no price",
+  // so they're hidden by default.
+  const [hideZero, setHideZero] = useState(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -165,35 +204,33 @@ export default function Restock() {
   // volume matters because the SDE volume is the assembled size, which
   // overstates ships roughly tenfold.)
   const typeIds = useMemo(() => items.map((i) => i.typeId).sort((a, b) => a - b), [items]);
-  const { data: quoteData, isFetching: quotesLoading } = useQuery({
+  const { data: quoteData, isFetching: quotesLoading, isError: quotesFailed } = useQuery({
     queryKey: ['restock-quotes', typeIds],
     queryFn: () => api.invoke('getRestockQuotes', { typeIds }),
     enabled: typeIds.length > 0,
     staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
+    // The server answers within ~15s with whatever it has and keeps
+    // refreshing behind that, so re-ask soon while anything is still bare.
+    refetchInterval: (query) => {
+      const quotes = Object.values(query.state.data?.quotes ?? {});
+      return quotes.some((q) => q.jitaBestBuy == null && q.jitaBestSell == null) ? 30_000 : 5 * 60_000;
+    },
     placeholderData: (prev) => prev,
   });
 
   const rows = useMemo(
     () =>
       items.map((raw) => {
-        const q = quoteData?.quotes?.[raw.typeId];
-        const item = q
-          ? {
-              ...raw,
-              jitaBestBuy: q.jitaBestBuy ?? raw.jitaBestBuy,
-              jitaBestSell: q.jitaBestSell ?? raw.jitaBestSell,
-              volumePerUnit: q.volumePerUnit ?? raw.volumePerUnit,
-            }
-          : raw;
-        return { item, c: calcItem(item, settings) };
+        const { item, est } = resolvePrices(raw, quoteData?.quotes?.[raw.typeId]);
+        return { item, est, c: calcItem(item, settings) };
       }),
     [items, settings, quoteData],
   );
 
   const totals = useMemo(() => {
-    const t = { units: 0, m3: 0, collateral: 0, missing: [] };
-    for (const { item, c } of rows) {
+    const t = { units: 0, m3: 0, collateral: 0, missing: [], estimated: 0 };
+    for (const { item, est, c } of rows) {
+      if (est.buy || est.sell) t.estimated += 1;
       t.units += c.qty;
       t.m3 += c.m3;
       t.collateral += c.collateral;
@@ -204,10 +241,20 @@ export default function Restock() {
     return t;
   }, [rows]);
 
+  const zeroCount = useMemo(() => rows.filter(({ c }) => c.qty === 0).length, [rows]);
+
   const visibleRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return q ? rows.filter(({ item }) => String(item.itemName ?? '').toLowerCase().includes(q)) : rows;
-  }, [rows, filter]);
+    return rows.filter(
+      ({ item, c }) =>
+        (!hideZero || c.qty > 0) && (!q || String(item.itemName ?? '').toLowerCase().includes(q)),
+    );
+  }, [rows, filter, hideZero]);
+
+  function removeZeroQty() {
+    for (const { item, c } of rows) if (c.qty === 0) removeItem(item.typeId);
+    toast.success(`Removed ${zeroCount} item${zeroCount === 1 ? '' : 's'} with quantity 0`);
+  }
 
   const multibuyText = useMemo(() => formatMultibuy(items), [items]);
 
@@ -292,8 +339,8 @@ export default function Restock() {
           value={formatISK(totals.profit)}
           subtitle={
             totals.marginPct != null
-              ? `${totals.marginPct >= 0 ? '+' : ''}${(totals.marginPct * 100).toFixed(1)}% on cost, after sell fees`
-              : 'After sell fees'
+              ? `${totals.marginPct >= 0 ? '+' : ''}${(totals.marginPct * 100).toFixed(1)}% on Net Buy`
+              : 'Net Sell − Net Buy'
           }
           variant={totals.profit >= 0 ? 'emerald' : 'rose'}
         />
@@ -364,21 +411,33 @@ export default function Restock() {
               <Line label="Net Sell" value={totals.netSell} total tone="text-sky-400" />
               <Line
                 label="Profit"
-                hint="after sell fees"
+                hint="Net Sell − Net Buy"
                 value={totals.profit}
                 tone={totals.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}
               />
             </Receipt>
 
-            {totals.missing.length > 0 && (
-              <p className="md:col-span-2 text-xs text-amber-400/80">
-                {quotesLoading && !quoteData
-                  ? 'Fetching Jita prices…'
-                  : `Jita has no buy or sell orders right now for ${totals.missing.slice(0, 5).join(', ')}${
-                      totals.missing.length > 5 ? ` and ${totals.missing.length - 5} more` : ''
-                    } — the empty side counts as zero.`}
-              </p>
-            )}
+            <div className="md:col-span-2 space-y-1 text-xs">
+              {quotesFailed && (
+                <p className="text-rose-400">
+                  Couldn&apos;t load live Jita prices — showing the prices saved when items were added.
+                </p>
+              )}
+              {quotesLoading && !quoteData && <p className="text-slate-500">Fetching live Jita prices…</p>}
+              {quoteData && totals.estimated > 0 && (
+                <p className="text-slate-500">
+                  <span className="text-amber-400/80">≈</span> {totals.estimated} item
+                  {totals.estimated === 1 ? ' has' : 's have'} orders on only one side at Jita 4-4; the other side is
+                  estimated (hover a ≈ price for its source).
+                </p>
+              )}
+              {quoteData && totals.missing.length > 0 && (
+                <p className="text-amber-400/80">
+                  No price anywhere for {totals.missing.slice(0, 5).join(', ')}
+                  {totals.missing.length > 5 ? ` and ${totals.missing.length - 5} more` : ''} — counted as zero.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -387,9 +446,28 @@ export default function Restock() {
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-800">
           <h2 className="text-sm font-semibold text-white">
-            Items <span className="text-slate-500 font-normal">({items.length})</span>
+            Items{' '}
+            <span className="text-slate-500 font-normal">
+              ({items.length - zeroCount} to buy{zeroCount > 0 && ` · ${zeroCount} at quantity 0`})
+            </span>
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {zeroCount > 0 && (
+              <>
+                <button
+                  onClick={() => setHideZero((h) => !h)}
+                  className="h-8 px-2.5 rounded-lg border border-slate-700 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  {hideZero ? `Show ${zeroCount} at 0` : 'Hide quantity 0'}
+                </button>
+                <button
+                  onClick={removeZeroQty}
+                  className="h-8 px-2.5 rounded-lg border border-rose-500/30 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors"
+                >
+                  Remove quantity 0
+                </button>
+              </>
+            )}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
               <Input
@@ -437,10 +515,20 @@ export default function Restock() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(({ item, c }) => {
-                const x = v(c);
+              {visibleRows.map(({ item, est, c }) => {
+                // A zero line total says nothing; show what one unit costs
+                // instead, dimmed, so a quantity can be chosen from it.
+                const zero = c.qty === 0;
+                const x = zero ? c.unit : v(c);
                 return (
-                  <tr key={item.typeId} className="border-b border-slate-800/70 hover:bg-slate-800/30">
+                  <tr
+                    key={item.typeId}
+                    className={cn(
+                      'border-b border-slate-800/70 hover:bg-slate-800/30',
+                      zero && '[&>td:nth-child(n+3)]:opacity-50',
+                    )}
+                    title={zero ? 'Quantity 0 — prices shown per unit' : undefined}
+                  >
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <img
@@ -464,11 +552,11 @@ export default function Restock() {
                     <td className="px-2 text-right tnum text-slate-500">
                       {item.volumePerUnit == null ? '—' : formatQty(perUnit ? item.volumePerUnit : c.m3)}
                     </td>
-                    <td className="px-2 text-right tnum text-slate-300" title={formatISKFull(x.grossBuy)}>
-                      {formatISK(x.grossBuy)}
+                    <td className="px-2 text-right tnum text-slate-300" title={est.buy ?? formatISKFull(x.grossBuy)}>
+                      <Estimated note={est.buy}>{formatISK(x.grossBuy)}</Estimated>
                     </td>
-                    <td className="px-2 text-right tnum text-slate-300" title={formatISKFull(x.grossSell)}>
-                      {formatISK(x.grossSell)}
+                    <td className="px-2 text-right tnum text-slate-300" title={est.sell ?? formatISKFull(x.grossSell)}>
+                      <Estimated note={est.sell}>{formatISK(x.grossSell)}</Estimated>
                     </td>
                     <td
                       className="px-2 text-right tnum text-amber-400"
@@ -503,7 +591,9 @@ export default function Restock() {
               {visibleRows.length === 0 && (
                 <tr>
                   <td colSpan={9} className="py-8 text-center text-sm text-slate-500">
-                    No items match &ldquo;{filter}&rdquo;.
+                    {filter.trim()
+                      ? <>No items match &ldquo;{filter}&rdquo;.</>
+                      : `Every item is at quantity 0 — set a quantity, or show the ${zeroCount} hidden items.`}
                   </td>
                 </tr>
               )}

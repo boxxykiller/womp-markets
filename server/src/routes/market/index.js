@@ -573,7 +573,7 @@ async function bulkAddMarketWatchItems({ structureId, items } = {}, req) {
 const PACKAGED_TTL_MS = 24 * 3600_000;
 
 async function packagedVolumes(ids) {
-  const entries = await mapWithConcurrency(ids, 10, async (id) => {
+  const entries = await mapWithConcurrency(ids, 20, async (id) => {
     try {
       const { data } = await cacheWrap(`packaged-volume:${id}`, PACKAGED_TTL_MS, async () => {
         const type = await esiFetch(`/universe/types/${id}/`);
@@ -591,6 +591,7 @@ async function packagedVolumes(ids) {
 
 // A price older than this is re-fetched when the Restock page asks for it.
 const QUOTE_MAX_AGE_MS = 10 * 60_000;
+const QUOTE_REFRESH_WAIT_MS = 15_000;
 
 /**
  * Live Jita prices and packaged volume for the restock list.
@@ -612,16 +613,17 @@ async function getRestockQuotes({ typeIds } = {}) {
   });
 
   if (stale.length > 0) {
-    try {
-      await refreshReferencePrices({ typeIds: stale });
-      prices = await referencePriceMap(ids);
-    } catch (err) {
-      // Serve what's stored; a provider outage shouldn't break the page.
+    // Wait a bounded time for fresh prices. If Jita is slow the page gets
+    // what's stored now, and the refresh carries on so the next load
+    // (the page re-polls) picks it up.
+    const refresh = refreshReferencePrices({ typeIds: stale }).catch((err) => {
       console.error(`[restock] Jita refresh failed for ${stale.length} types: ${err.message}`);
-    }
+    });
+    await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, QUOTE_REFRESH_WAIT_MS))]);
+    prices = await referencePriceMap(ids);
   }
 
-  const volumes = await packagedVolumes(ids);
+  const [volumes, averages] = await Promise.all([packagedVolumes(ids), averagePrices()]);
   const quotes = {};
   for (const id of ids) {
     const p = prices.get(id);
@@ -629,10 +631,27 @@ async function getRestockQuotes({ typeIds } = {}) {
       jitaBestBuy: p?.bestBuy ?? null,
       jitaBestSell: p?.bestSell ?? null,
       jitaFetchedAt: p?.fetchedAt ?? null,
+      averagePrice: averages.get(id) ?? null,
       volumePerUnit: volumes.get(id) ?? null,
     };
   }
   return { quotes };
+}
+
+// CCP's universe-wide average price per type: one request for every type, so
+// it's the fallback when Jita 4-4 has no orders on a side. Hourly is plenty —
+// ESI itself only updates it a few times a day.
+async function averagePrices() {
+  try {
+    const { data } = await cacheWrap('esi-average-prices', 3600_000, async () => {
+      const rows = await esiFetch('/markets/prices/');
+      return new Map((rows || []).filter((r) => r.average_price > 0).map((r) => [r.type_id, r.average_price]));
+    });
+    return data;
+  } catch (err) {
+    console.error(`[restock] average prices unavailable: ${err.message}`);
+    return new Map();
+  }
 }
 
 async function pollMarketNow({ id, structureId } = {}) {
