@@ -9,6 +9,8 @@
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { pollSource } from '../../lib/marketPoller.js';
+import { cacheWrap } from '../../lib/cache.js';
+import { esiFetch, mapWithConcurrency } from '../../lib/esiClient.js';
 import {
   avgDailyVolume,
   buildDailyLookup,
@@ -551,6 +553,30 @@ async function bulkAddMarketWatchItems({ structureId, items } = {}, req) {
   return { added, updated };
 }
 
+// Packaged volume per type, for freight. The SDE `volume` is the assembled
+// size, which for ships is ~10x what a courier actually carries (a Raven is
+// 470,000 m³ assembled, 50,000 packaged), so shipping estimates need ESI's
+// packaged_volume. Cached in-process: it changes only with a game patch.
+const PACKAGED_TTL_MS = 24 * 3600_000;
+
+async function getPackagedVolumes({ typeIds } = {}) {
+  const ids = [...new Set((Array.isArray(typeIds) ? typeIds : []).map(Number).filter(Boolean))].slice(0, 500);
+  const entries = await mapWithConcurrency(ids, 10, async (id) => {
+    try {
+      const { data } = await cacheWrap(`packaged-volume:${id}`, PACKAGED_TTL_MS, async () => {
+        const type = await esiFetch(`/universe/types/${id}/`);
+        return type.packaged_volume ?? type.volume ?? null;
+      });
+      return [id, data];
+    } catch {
+      // One failed lookup shouldn't blank the rest; the client falls back
+      // to the SDE volume for that item.
+      return [id, null];
+    }
+  });
+  return { volumes: Object.fromEntries(entries) };
+}
+
 async function pollMarketNow({ id, structureId } = {}) {
   const source = id ? await prisma.marketSource.findUnique({ where: { id } }) : await resolveSource(structureId);
   if (!source) throw new HttpError(404, 'Market source not found');
@@ -564,6 +590,7 @@ export const marketHandlers = {
   getMarketItem: { fn: getMarketItem, auth: 'auth' },
   getMarketFeed: { fn: getMarketFeed, auth: 'auth' },
   getMarketWatchlist: { fn: getMarketWatchlist, auth: 'auth' },
+  getPackagedVolumes: { fn: getPackagedVolumes, auth: 'auth' },
 
   // Managing the tracked list is admin-only. The UI hides these controls for
   // everyone else, but this is the boundary that actually enforces it.

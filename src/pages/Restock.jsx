@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronDown, Copy, Package, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { api } from '@/api/client';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 import { Button } from '@/components/ui/button';
@@ -132,7 +134,25 @@ export default function Restock() {
 
   const set = (key) => (value) => setSettings((s) => ({ ...s, [key]: value }));
 
-  const rows = useMemo(() => items.map((item) => ({ item, c: calcItem(item, settings) })), [items, settings]);
+  // Freight is charged on packaged volume; the stored SDE volume is the
+  // assembled size, which overstates ships roughly tenfold.
+  const typeIds = useMemo(() => items.map((i) => i.typeId).sort((a, b) => a - b), [items]);
+  const { data: packaged } = useQuery({
+    queryKey: ['packaged-volumes', typeIds],
+    queryFn: () => api.invoke('getPackagedVolumes', { typeIds }),
+    enabled: typeIds.length > 0,
+    staleTime: Infinity,
+  });
+
+  const rows = useMemo(
+    () =>
+      items.map((raw) => {
+        const volume = packaged?.volumes?.[raw.typeId];
+        const item = volume != null ? { ...raw, volumePerUnit: volume } : raw;
+        return { item, c: calcItem(item, settings) };
+      }),
+    [items, settings, packaged],
+  );
 
   const totals = useMemo(() => {
     const t = { units: 0, m3: 0, collateral: 0, missing: 0 };
