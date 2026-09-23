@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import icon from '@/assets/womp-icon.svg';
+import icon from '@/assets/womp-logo.png';
 
 // CCP's official "Log in with EVE Online" button asset.
 const EVE_SSO_IMAGE = 'https://web.ccpgamescdn.com/eveonlineassets/developers/eve-sso-login-black-large.png';
@@ -34,7 +34,7 @@ export default function Login() {
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4">
       <div className="w-full max-w-sm text-center">
-        <img src={icon} alt="" className="w-16 h-16 mx-auto mb-4" />
+        <img src={icon} alt="WOMP" className="w-24 h-24 mx-auto mb-4" />
         <h1 className="text-2xl font-bold text-white">womp-markets</h1>
         <p className="text-sm text-slate-400 mt-1 mb-8">
           Sign in with your EVE character to view the citadel market.

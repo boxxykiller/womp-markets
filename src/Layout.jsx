@@ -6,7 +6,7 @@ import { api } from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useCart } from '@/hooks/useCart';
 import { cn } from '@/lib/utils';
-import icon from '@/assets/womp-icon.svg';
+import icon from '@/assets/womp-logo.png';
 import heroBg from '@/assets/womp-bg-hero.svg';
 
 // A flat top nav rather than a sidebar: there are six destinations, and the
@@ -76,7 +76,7 @@ export default function Layout({ children }) {
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6">
           <div className="h-14 flex items-center justify-between gap-4">
             <Link to="/" className="flex items-center gap-2.5 shrink-0">
-              <img src={icon} alt="" className="w-8 h-8" />
+              <img src={icon} alt="WOMP" className="w-10 h-10" />
               <div className="leading-tight">
                 <div className="text-sm font-bold text-white">womp-markets</div>
                 <div className="text-[11px] text-slate-400">Citadel Market Tracker</div>
