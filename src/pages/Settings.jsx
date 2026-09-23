@@ -4,6 +4,7 @@ import { Database, Loader2, RefreshCw, Save, Settings as SettingsIcon, Trash2 } 
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
+import { AccessPolicySection, UsersSection } from '@/components/settings/AccessSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/useAuth';
@@ -188,7 +189,7 @@ export default function Settings() {
         icon={SettingsIcon}
         accent="slate"
         title="Settings"
-        subtitle="Market sources, static data, and reference pricing"
+        subtitle="Market sources, access, users, static data, and reference pricing"
       />
 
       {isFirstRun && (
@@ -303,6 +304,13 @@ export default function Settings() {
             </div>
           )}
         </Section>
+      )}
+
+      {isAdmin && (
+        <>
+          <AccessPolicySection Section={Section} />
+          <UsersSection Section={Section} />
+        </>
       )}
 
       <Section

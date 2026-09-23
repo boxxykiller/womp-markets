@@ -2,6 +2,8 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../middleware/errorHandler.js';
+import { getEffectiveAllowlist, getStoredPolicy, saveStoredPolicy } from '../../lib/accessPolicy.js';
+import { esiFetch } from '../../lib/esiClient.js';
 import {
   EVE_SCOPES,
   buildAuthorizeUrl,
@@ -75,7 +77,7 @@ async function eveCallback(body = {}, req, res) {
   const existing = await prisma.eveCharacter.findUnique({ where: { characterId } });
   if (existing?.banned) throw new HttpError(403, 'This character has been blocked from this application.');
 
-  if (!isAffiliationAllowed(affiliation)) {
+  if (!isAffiliationAllowed(affiliation, await getEffectiveAllowlist())) {
     // Recorded anyway (inactive, no session) so an admin can see who tried
     // and allow them without asking them to log in blind a second time.
     await prisma.eveCharacter.upsert({
@@ -178,36 +180,57 @@ async function getMe(body, req) {
 }
 
 async function listCharacters() {
-  const characters = await prisma.eveCharacter.findMany({
-    orderBy: [{ active: 'desc' }, { characterName: 'asc' }],
-    // Tokens must never leave the server.
-    select: {
-      id: true,
-      characterId: true,
-      characterName: true,
-      corporationName: true,
-      allianceName: true,
-      role: true,
-      banned: true,
-      active: true,
-      isMain: true,
-      lastLoginAt: true,
-      expiresAt: true,
-      scopes: true,
-    },
-  });
-  return { characters };
+  const [characters, allowlist] = await Promise.all([
+    prisma.eveCharacter.findMany({
+      orderBy: [{ active: 'desc' }, { characterName: 'asc' }],
+      // Tokens must never leave the server.
+      select: {
+        id: true,
+        characterId: true,
+        characterName: true,
+        ownerKey: true,
+        corporationId: true,
+        corporationName: true,
+        allianceId: true,
+        allianceName: true,
+        affiliationCheckedAt: true,
+        role: true,
+        banned: true,
+        active: true,
+        isMain: true,
+        connectedAt: true,
+        lastLoginAt: true,
+        expiresAt: true,
+        scopes: true,
+      },
+    }),
+    getEffectiveAllowlist(),
+  ]);
+  return {
+    characters: characters.map((c) => ({
+      ...c,
+      // Whether the current policy would let them in on their next login —
+      // lets the page flag people who were turned away, or who would be now.
+      allowed: isAffiliationAllowed(c, allowlist),
+      envAdmin: isAdminCharacter(c.characterName),
+    })),
+  };
 }
 
-async function setCharacterRole({ characterId, role } = {}) {
+async function setCharacterRole({ characterId, role } = {}, req) {
   if (!characterId) throw new HttpError(400, 'characterId required');
   if (!['user', 'admin'].includes(role)) throw new HttpError(400, 'role must be "user" or "admin"');
+  // Demoting yourself is almost always a misclick, and can leave no admin.
+  if (role !== 'admin' && characterId === req?.user?.characterId) {
+    throw new HttpError(400, 'You cannot remove your own admin role.');
+  }
   await prisma.eveCharacter.update({ where: { characterId }, data: { role } });
   return { success: true };
 }
 
-async function setCharacterBanned({ characterId, banned } = {}) {
+async function setCharacterBanned({ characterId, banned } = {}, req) {
   if (!characterId) throw new HttpError(400, 'characterId required');
+  if (banned && characterId === req?.user?.characterId) throw new HttpError(400, 'You cannot block yourself.');
   // An admin listed in ADMIN_CHARACTER_NAMES would be re-promoted on their
   // next login anyway, so blocking the ban here avoids a confusing no-op.
   if (isAdminCharacter((await prisma.eveCharacter.findUnique({ where: { characterId } }))?.characterName)) {
@@ -217,17 +240,75 @@ async function setCharacterBanned({ characterId, banned } = {}) {
   return { success: true };
 }
 
+// The signed-in character's own corp and alliance, so the Settings page can
+// offer "allow my corporation / alliance" without anyone looking up an id.
+async function getOwnAffiliation(req) {
+  if (!req?.user?.characterId || req.user.characterId === 'local-admin') return null;
+  const row = await prisma.eveCharacter.findUnique({
+    where: { characterId: req.user.characterId },
+    select: { corporationId: true, corporationName: true, allianceId: true, allianceName: true },
+  });
+  return row ?? null;
+}
+
 // Surfaced on the Settings page so an unconfigured (wide open) deployment is
 // visible rather than silent.
-async function getAccessPolicy() {
-  const corps = parseIdList(process.env.ALLOWED_CORPORATION_IDS);
-  const alliances = parseIdList(process.env.ALLOWED_ALLIANCE_IDS);
+async function getAccessPolicy(body, req) {
+  const [stored, me] = await Promise.all([getStoredPolicy(), getOwnAffiliation(req)]);
+  const allowlist = await getEffectiveAllowlist(stored);
   return {
-    allowedCorporationIds: corps,
-    allowedAllianceIds: alliances,
-    open: corps.length === 0 && alliances.length === 0,
+    corporations: stored.corporations,
+    alliances: stored.alliances,
+    envCorporationIds: allowlist.envCorporationIds,
+    envAllianceIds: allowlist.envAllianceIds,
+    allowedCorporationIds: allowlist.allowedCorporationIds,
+    allowedAllianceIds: allowlist.allowedAllianceIds,
+    open: allowlist.allowedCorporationIds.length === 0 && allowlist.allowedAllianceIds.length === 0,
     adminNames: parseIdList(process.env.ADMIN_CHARACTER_NAMES),
+    me,
   };
+}
+
+// Fills in the display name for an entry added by bare id. A failed lookup
+// means the id doesn't exist, which is worth refusing rather than storing.
+async function resolveEntryName(kind, entry, known) {
+  if (entry.name) return entry;
+  if (known.has(entry.id)) return { ...entry, name: known.get(entry.id) };
+  const path = kind === 'corporation' ? `/corporations/${entry.id}/` : `/alliances/${entry.id}/`;
+  const info = await esiFetch(path).catch(() => null);
+  if (!info?.name) throw new HttpError(400, `No ${kind} found with id ${entry.id}.`);
+  return { ...entry, name: info.name };
+}
+
+async function saveAccessPolicy({ corporations = [], alliances = [] } = {}, req) {
+  const me = await getOwnAffiliation(req);
+  // Names already known locally (from logins or the current policy) skip ESI.
+  const stored = await getStoredPolicy();
+  const knownCorps = new Map(stored.corporations.map((c) => [c.id, c.name]));
+  const knownAlliances = new Map(stored.alliances.map((a) => [a.id, a.name]));
+  if (me?.corporationId) knownCorps.set(me.corporationId, me.corporationName);
+  if (me?.allianceId) knownAlliances.set(me.allianceId, me.allianceName);
+
+  const clean = (list) =>
+    (Array.isArray(list) ? list : [])
+      .map((e) => ({ id: String(e?.id ?? '').trim(), name: e?.name || null }))
+      .filter((e) => /^\d+$/.test(e.id));
+
+  const next = {
+    corporations: await Promise.all(clean(corporations).map((e) => resolveEntryName('corporation', e, knownCorps))),
+    alliances: await Promise.all(clean(alliances).map((e) => resolveEntryName('alliance', e, knownAlliances))),
+  };
+
+  // Refuse a policy that would shut the admin making the change out on their
+  // next login. The local dev admin has no affiliation, so it's exempt.
+  const allowlist = await getEffectiveAllowlist(next);
+  const restricted = allowlist.allowedCorporationIds.length > 0 || allowlist.allowedAllianceIds.length > 0;
+  if (me && restricted && !isAffiliationAllowed(me, allowlist)) {
+    throw new HttpError(400, 'That policy would block your own character. Allow your corporation or alliance first.');
+  }
+
+  await saveStoredPolicy(next);
+  return getAccessPolicy({}, req);
 }
 
 export const authHandlers = {
@@ -239,4 +320,5 @@ export const authHandlers = {
   setCharacterRole: { fn: setCharacterRole, auth: 'admin' },
   setCharacterBanned: { fn: setCharacterBanned, auth: 'admin' },
   getAccessPolicy: { fn: getAccessPolicy, auth: 'admin' },
+  saveAccessPolicy: { fn: saveAccessPolicy, auth: 'admin' },
 };
