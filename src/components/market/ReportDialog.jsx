@@ -63,6 +63,11 @@ const COLUMNS = {
   unitsConfirmed: { label: 'Observed', align: 'right', render: (r) => formatQty(r.unitsConfirmed) },
   unitsEstimated: { label: 'Inferred', align: 'right', render: (r) => formatQty(r.unitsEstimated) },
   units: { label: 'Units', align: 'right', render: (r) => formatQty(r.units) },
+  sold: {
+    label: 'Sold',
+    align: 'right',
+    render: (r) => <span className="text-amber-400 font-medium">{formatQty(r.units)}</span>,
+  },
   isk: { label: 'ISK', align: 'right', render: (r) => formatISK(r.isk) },
   perDay: { label: 'Per day', align: 'right', render: (r) => formatRate(r.unitsPerDay) },
   iskPerDay: { label: 'Est. ISK/day', align: 'right', render: (r) => formatISK(r.iskPerDay) },
@@ -122,6 +127,7 @@ function toCsv(rows, columnKeys) {
         case 'lastSale': return r.daysSinceSale ?? '';
         case 'outOfStock': return r.daysOutOfStock ?? '';
         case 'jitaRate': return r.jitaMaPerDay ?? '';
+        case 'sold': return r.units ?? '';
         default: return r[k] ?? '';
       }
     });
@@ -140,12 +146,21 @@ async function copyText(text, label) {
   }
 }
 
-/** The report's own filters: number boxes and fixed-choice selectors. */
+/** The report's own filters: number boxes, dates and fixed-choice selectors. */
 function FilterControls({ filters, params, setParams }) {
-  return (filters ?? []).map((f) => (
+  // A filter can depend on another, e.g. dates that only apply to a custom period.
+  const visible = (filters ?? []).filter((f) => !f.showWhen || f.showWhen(params));
+  return visible.map((f) => (
     <label key={f.key} className="flex items-center gap-2 text-xs text-slate-400">
       {f.label}
-      {f.type === 'select' ? (
+      {f.type === 'date' ? (
+        <Input
+          type="date"
+          value={params[f.key] ?? ''}
+          onChange={(e) => setParams((p) => ({ ...p, [f.key]: e.target.value }))}
+          className="w-36 h-8 bg-slate-900 border-slate-800 text-slate-200 tnum"
+        />
+      ) : f.type === 'select' ? (
         <Select value={String(params[f.key] ?? f.default)} onValueChange={(v) => setParams((p) => ({ ...p, [f.key]: v }))}>
           <SelectTrigger className="w-28 h-8 bg-slate-900 border-slate-800 text-slate-200">
             <SelectValue />
@@ -387,7 +402,9 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
               {rows.length} row{rows.length === 1 ? '' : 's'}
               {data.summary?.estimatedCost != null && ` · est. ${formatISK(data.summary.estimatedCost)} to restock`}
               {data.summary?.iskTiedUp != null && ` · ${formatISK(data.summary.iskTiedUp)} tied up`}
+              {data.summary?.totalUnits != null && ` · ${formatQty(data.summary.totalUnits)} units`}
               {data.summary?.totalIsk != null && ` · ${formatISK(data.summary.totalIsk)} traded`}
+              {data.summary?.to != null && ` · ${data.summary.from ?? 'first poll'} → ${data.summary.to} (UTC)`}
               {data.summary?.iskPerDay != null && ` · ${formatISK(data.summary.iskPerDay)}/day moved`}
               {!!data.summary?.soldOut && ` · ${data.summary.soldOut} sold out`}
               {data.summary?.counts &&

@@ -8,6 +8,7 @@ import {
   LineChart as LineChartIcon,
   PackageSearch,
   PackageX,
+  Receipt,
   Scale,
   Sparkles,
   Sprout,
@@ -27,6 +28,22 @@ const PERIOD_OPTIONS = [
   { value: '365', label: '1 year' },
   { value: '0', label: 'All time' },
 ];
+
+// Sales windows in UTC days, today included: "1" is today so far.
+const SALES_PERIOD_OPTIONS = [
+  { value: '1', label: 'Today' },
+  { value: '2', label: '2 days' },
+  { value: '3', label: '3 days' },
+  { value: '7', label: '7 days' },
+  { value: '14', label: '14 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '0', label: 'All time' },
+  { value: 'custom', label: 'Custom…' },
+];
+
+const todayUtc = () => new Date().toISOString().slice(0, 10);
+const isCustom = (params) => params.days === 'custom';
 
 const MA_OPTIONS = [
   { value: '3', label: '3-day' },
@@ -55,6 +72,22 @@ const REPORTS = [
     icon: AlertTriangle,
     accent: 'rose',
     columns: ['status', 'min', 'volume', 'restock', 'jitaSell', 'lineCost'],
+    multibuy: true,
+  },
+  {
+    key: 'trackedSales',
+    handler: 'reportTrackedSales',
+    title: 'Tracked sales',
+    description: 'Every tracked item sold in a chosen time frame, with quantities — copy it as a multibuy to buy back what went out.',
+    icon: Receipt,
+    accent: 'emerald',
+    columns: ['sold', 'unitsConfirmed', 'unitsEstimated', 'volume', 'isk', 'jitaSell', 'lineCost'],
+    chart: 'units',
+    filters: [
+      { key: 'days', label: 'Period', type: 'select', options: SALES_PERIOD_OPTIONS, default: '7' },
+      { key: 'from', label: 'From', type: 'date', default: todayUtc(), showWhen: isCustom },
+      { key: 'to', label: 'To', type: 'date', default: todayUtc(), showWhen: isCustom },
+    ],
     multibuy: true,
   },
   {

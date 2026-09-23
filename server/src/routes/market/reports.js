@@ -706,7 +706,96 @@ async function reportItemHistory({ structureId, typeId, days = 90, maDays = 7, t
   };
 }
 
+// 12. Every tracked item that sold in a chosen window, with the units sold —
+// the quantity to buy back to replace exactly what went out. `days` picks a
+// trailing window of UTC days (1 = today so far); `days: 'custom'` uses the
+// inclusive `from`/`to` dates (YYYY-MM-DD, UTC) instead.
+async function reportTrackedSales({ structureId, days = 7, from, to } = {}) {
+  const source = await resolveSource(structureId);
+  if (!source) return { source: null, rows: [], summary: {} };
+
+  const today = utcDayStart();
+  let since;
+  let until;
+  if (days === 'custom') {
+    const parse = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(String(s ?? '')) ? new Date(`${s}T00:00:00Z`) : null);
+    since = parse(from) ?? today;
+    until = parse(to) ?? today;
+    if (until < since) [since, until] = [until, since];
+  } else {
+    const n = Number(days) > 0 ? Math.floor(Number(days)) : null;
+    since = n ? new Date(today.getTime() - (n - 1) * DAY_MS) : new Date(0);
+    until = today;
+  }
+  // Exclusive upper bound, so the last day counts in full.
+  const before = new Date(until.getTime() + DAY_MS);
+
+  const sId = source.structureId;
+  const watch = await prisma.marketWatchItem.findMany({ where: { structureId: sId } });
+  const typeIds = watch.map((w) => w.typeId);
+  if (typeIds.length === 0) {
+    return { source: { id: source.id, structureId: sId, name: source.name }, rows: [], summary: { items: 0 } };
+  }
+
+  const { aggregateBook, resolveItemNames, dailyLookupFor, buildRow } = await import('./index.js');
+  const [grouped, bookMap, nameMap, refRows, dailyByType] = await Promise.all([
+    prisma.marketDailyStat.groupBy({
+      by: ['typeId'],
+      where: { structureId: sId, typeId: { in: typeIds }, date: { gte: since, lt: before } },
+      _sum: { unitsSoldConfirmed: true, unitsSoldEstimated: true, iskTradedConfirmed: true, iskTradedEstimated: true },
+    }),
+    aggregateBook(sId, typeIds),
+    resolveItemNames(typeIds),
+    prisma.referencePrice.findMany({ where: { typeId: { in: typeIds } } }),
+    dailyLookupFor(sId, typeIds),
+  ]);
+  const refMap = new Map(refRows.map((r) => [r.typeId, r]));
+  const watchByType = new Map(watch.map((w) => [w.typeId, w]));
+
+  const now = new Date();
+  const rows = grouped
+    .map((g) => {
+      const unitsConfirmed = g._sum.unitsSoldConfirmed || 0;
+      const unitsEstimated = g._sum.unitsSoldEstimated || 0;
+      const units = unitsConfirmed + unitsEstimated;
+      const base = buildRow(g.typeId, {
+        book: bookMap.get(g.typeId),
+        meta: nameMap.get(g.typeId),
+        reference: refMap.get(g.typeId),
+        dailyByType,
+        watch: watchByType.get(g.typeId),
+        now,
+      });
+      return {
+        ...base,
+        unitsConfirmed,
+        unitsEstimated,
+        units,
+        isk: (g._sum.iskTradedConfirmed || 0) + (g._sum.iskTradedEstimated || 0),
+        // In restockQuantity so the dialog's multibuy and cost columns buy
+        // back what sold. Partial units round up: you can't buy half of one.
+        restockQuantity: Math.ceil(units),
+      };
+    })
+    .filter((r) => r.units > 0)
+    .sort((a, b) => b.units - a.units);
+
+  return {
+    source: { id: source.id, structureId: sId, name: source.name },
+    rows,
+    summary: {
+      items: rows.length,
+      totalUnits: rows.reduce((s, r) => s + r.units, 0),
+      totalIsk: rows.reduce((s, r) => s + r.isk, 0),
+      estimatedCost: rows.reduce((s, r) => s + r.restockQuantity * (r.jitaBestSell ?? r.bestSell ?? 0), 0),
+      from: since.getTime() === 0 ? null : since.toISOString().slice(0, 10),
+      to: until.toISOString().slice(0, 10),
+    },
+  };
+}
+
 export const reportHandlers = {
+  reportTrackedSales: { fn: reportTrackedSales, auth: 'auth' },
   reportRestock: { fn: reportRestock, auth: 'auth' },
   reportStockoutForecast: { fn: reportStockoutForecast, auth: 'auth' },
   reportJitaSpread: { fn: reportJitaSpread, auth: 'auth' },
