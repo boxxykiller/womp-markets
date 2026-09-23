@@ -58,7 +58,6 @@ function readSettings() {
 // Sell side: after fees = Jita Sell − sell broker fee − SCC surcharge
 //                         − sales tax, each charged on the Jita sell price
 //            Net Sell   = after fees + markup (a % of Jita Sell)
-//            list price = Jita Sell + markup — what to put the order up at
 // Profit:    Net Sell − Net Buy
 
 function calcItem(item, s) {
@@ -81,13 +80,12 @@ function calcItem(item, s) {
   const afterFees = sell - sellFees;
   const markup = sell * (s.markupPct / 100);
   const netSell = afterFees + markup;
-  const listPrice = sell + markup;
 
   const profit = netSell - netBuy;
 
   const unit = {
     grossBuy: buy, grossSell: sell, brokerBuy, freight, collateralFee, netBuy,
-    brokerSell, scc, tax, sellFees, afterFees, markup, listPrice, netSell, profit,
+    brokerSell, scc, tax, sellFees, afterFees, markup, netSell, profit,
   };
   const line = Object.fromEntries(Object.entries(unit).map(([k, v]) => [k, v * qty]));
   return { qty, m3: m3 * qty, collateral: sell * qty, unit, line, missing: item.jitaBestBuy == null && item.jitaBestSell == null };
@@ -372,15 +370,15 @@ export default function Restock() {
 
   const multibuyText = useMemo(() => formatMultibuy(items), [items]);
 
-  // "Item Name<TAB>price" per line: the list price per unit (Jita sell +
-  // markup) — what to put each sell order up at.
+  // "Item Name<TAB>price" per line: Net Sell per unit (Jita sell less sell
+  // fees, plus markup).
   // Same items as the multibuy (quantity above 0), and plain numbers with no
   // separators so it pastes cleanly into a spreadsheet.
   const priceSheetText = useMemo(
     () =>
       rows
-        .filter(({ c }) => c.qty > 0 && c.unit.listPrice > 0)
-        .map(({ item, c }) => `${String(item.itemName ?? `Type ${item.typeId}`).trim()}\t${c.unit.listPrice.toFixed(2)}`)
+        .filter(({ c }) => c.qty > 0 && c.unit.netSell > 0)
+        .map(({ item, c }) => `${String(item.itemName ?? `Type ${item.typeId}`).trim()}\t${c.unit.netSell.toFixed(2)}`)
         .join('\n'),
     [rows],
   );
@@ -401,7 +399,7 @@ export default function Restock() {
   const copyMultibuy = () => copyText('multibuy', multibuyText, 'Multibuy copied — paste it into EVE');
   const copyPriceSheet = () => {
     if (!priceSheetText) return toast.error('No priced items with a quantity to copy.');
-    copyText('prices', priceSheetText, 'Price sheet copied — item name and list price per unit');
+    copyText('prices', priceSheetText, 'Price sheet copied — item name and Net Sell per unit');
   };
 
   const header = (
