@@ -285,6 +285,7 @@ export function UsersSection({ Section }) {
                 const status = statusOf(c);
                 const isSelf = c.characterId === user?.characterId;
                 const corpListed = policy?.allowedCorporationIds?.includes(c.corporationId);
+                const allianceListed = policy?.allowedAllianceIds?.includes(c.allianceId);
                 return (
                   <tr key={c.id} className="border-b border-slate-800/60 last:border-0 align-middle">
                     <td className="py-2 pr-3">
@@ -330,6 +331,20 @@ export function UsersSection({ Section }) {
                           className="text-sky-400 h-7"
                         >
                           Allow corp
+                        </Button>
+                      )}
+                      {!c.allowed && c.allianceId && !allianceListed && policy && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={savePolicy.isPending}
+                          onClick={() => {
+                            const next = withEntry(policy, 'alliance', { id: c.allianceId, name: c.allianceName });
+                            if (next) savePolicy.mutate(next);
+                          }}
+                          className="text-sky-400 h-7"
+                        >
+                          Allow alliance
                         </Button>
                       )}
                       {!isSelf && !c.banned && (
