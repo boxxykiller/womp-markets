@@ -11,7 +11,6 @@ const describeDb = hasDb ? describe : describe.skip;
 
 let prisma;
 let pollSource;
-let cleanupExpiredHistory;
 let esiFetchPagedMock;
 
 const STRUCTURE_ID = '1000000000001';
@@ -70,7 +69,6 @@ async function createSource(overrides = {}) {
       sourceType: 'structure',
       readerCharacterName: READER,
       pollIntervalMinutes: 15,
-      retentionDays: 180,
       ...overrides,
     },
   });
@@ -79,7 +77,7 @@ async function createSource(overrides = {}) {
 describeDb('market poller diff', () => {
   beforeAll(async () => {
     ({ prisma } = await import('../../server/src/db/prisma.js'));
-    ({ pollSource, cleanupExpiredHistory } = await import('../../server/src/lib/marketPoller.js'));
+    ({ pollSource } = await import('../../server/src/lib/marketPoller.js'));
     ({ esiFetchPaged: esiFetchPagedMock } = await import('../../server/src/lib/esiClient.js'));
 
     await prisma.eveCharacter.deleteMany({ where: { characterName: READER } });
@@ -241,24 +239,6 @@ describeDb('market poller diff', () => {
       const archived = await prisma.marketOrderArchive.findFirst({ where: { orderId: '1' } });
       // 250 of the original 1000 left when it vanished — 75% traded.
       expect(archived).toMatchObject({ volumeRemain: 250, volumeTotal: 1000 });
-    });
-
-    it('survives a retention sweep that prunes the derived series', async () => {
-      const source = await createSource({ retentionDays: 1 });
-      await pollWith([order({ orderId: 1, price: 100 })], source.id);
-      await pollWith([], source.id);
-
-      // Age everything well past the retention window.
-      const old = new Date(Date.now() - 30 * 86400000);
-      await prisma.marketOrderEvent.updateMany({ data: { occurredAt: old } });
-      await prisma.marketDailyStat.updateMany({ data: { date: old } });
-
-      await cleanupExpiredHistory();
-
-      expect(await prisma.marketOrderEvent.count()).toBe(0);
-      expect(await prisma.marketDailyStat.count()).toBe(0);
-      // The archive is the permanent record — retention must not touch it.
-      expect(await prisma.marketOrderArchive.count()).toBe(1);
     });
   });
 

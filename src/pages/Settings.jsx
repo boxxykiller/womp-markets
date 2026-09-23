@@ -38,7 +38,6 @@ function SourceForm({ source, onDone, isFirstRun }) {
     structureId: source?.structureId ?? '',
     readerCharacterName: source?.readerCharacterName ?? '',
     pollIntervalMinutes: source?.pollIntervalMinutes ?? 15,
-    retentionDays: source?.retentionDays ?? 180,
   });
 
   const save = useMutation({
@@ -86,16 +85,6 @@ function SourceForm({ source, onDone, isFirstRun }) {
           min="1"
           value={form.pollIntervalMinutes}
           onChange={(e) => setForm((f) => ({ ...f, pollIntervalMinutes: Number(e.target.value) }))}
-          className="bg-slate-900 border-slate-700 text-slate-200 tnum"
-        />
-      </Field>
-
-      <Field label="Retention (days)" hint="How long daily stats and the event feed are kept. Order history is kept forever.">
-        <Input
-          type="number"
-          min="1"
-          value={form.retentionDays}
-          onChange={(e) => setForm((f) => ({ ...f, retentionDays: Number(e.target.value) }))}
           className="bg-slate-900 border-slate-700 text-slate-200 tnum"
         />
       </Field>
@@ -156,6 +145,16 @@ export default function Settings() {
     mutationFn: () => api.invoke('refreshJitaPrices', {}),
     onSuccess: (r) => {
       toast.success(`Refreshed ${r.updated ?? 0} Jita prices`);
+      refetchAll();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const refreshJitaHistory = useMutation({
+    mutationFn: () => api.invoke('refreshJitaHistory', {}),
+    onSuccess: (r) => {
+      if (r?.started) toast.success('Jita history sweep started');
+      else toast.error(`Not started: ${r?.reason ?? 'unknown reason'}`);
       refetchAll();
     },
     onError: (err) => toast.error(err.message),
@@ -400,6 +399,57 @@ export default function Settings() {
           )}
         </div>
       </Section>
+
+      {status.jitaHistory && (
+        <Section
+          title="Jita history"
+          description="Daily volume and prices for every item traded in The Forge, pulled from ESI once a day after downtime and kept forever."
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm">
+              <div className="text-slate-200 tnum">
+                {status.jitaHistory.rows.toLocaleString()} days stored across {status.jitaHistory.types.toLocaleString()} items
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {status.jitaHistory.firstDate
+                  ? `${formatDateTime(status.jitaHistory.firstDate)} to ${formatDateTime(status.jitaHistory.lastDate)}`
+                  : 'Nothing stored yet'}
+                {' · '}
+                {status.jitaHistory.requestsPerMinute
+                  ? `${status.jitaHistory.requestsPerMinute} requests/min`
+                  : 'disabled'}
+              </div>
+              {status.jitaHistory.lastRun && (
+                <div className="text-xs text-slate-600 mt-0.5">
+                  {status.jitaHistory.running
+                    ? `Sweeping: ${status.jitaHistory.lastRun.done.toLocaleString()} of ${status.jitaHistory.lastRun.due.toLocaleString()} items`
+                    : `Last sweep ${formatRelative(status.jitaHistory.lastRun.finishedAt)}: ${status.jitaHistory.lastRun.done.toLocaleString()} items, ${status.jitaHistory.lastRun.inserted.toLocaleString()} new days`}
+                  {status.jitaHistory.lastRun.failed > 0 && (
+                    <span className="text-amber-400"> · {status.jitaHistory.lastRun.failed} failed</span>
+                  )}
+                  {!status.jitaHistory.running && status.jitaHistory.lastRun.error && (
+                    <span className="text-rose-400"> · {status.jitaHistory.lastRun.error}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {isAdmin && (
+              <Button
+                variant="outline"
+                onClick={() => refreshJitaHistory.mutate()}
+                disabled={refreshJitaHistory.isPending || status.jitaHistory.running}
+                className="border-slate-700 text-slate-300"
+              >
+                <RefreshCw
+                  className={cn('w-4 h-4 mr-2', (refreshJitaHistory.isPending || status.jitaHistory.running) && 'animate-spin')}
+                />
+                {status.jitaHistory.running ? 'Sweeping…' : 'Sweep now'}
+              </Button>
+            )}
+          </div>
+        </Section>
+      )}
     </Page>
   );
 }

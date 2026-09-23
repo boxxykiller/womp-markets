@@ -7,8 +7,10 @@ import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StatusBadge } from './MarketTable';
+import { ItemHistoryView, VerdictBadge } from './ItemHistoryView';
 import { useCart } from '@/hooks/useCart';
 import { useDebounced } from '@/hooks/useDebounced';
 import { cn } from '@/lib/utils';
@@ -64,6 +66,29 @@ const COLUMNS = {
   isk: { label: 'ISK', align: 'right', render: (r) => formatISK(r.isk) },
   perDay: { label: 'Per day', align: 'right', render: (r) => formatRate(r.unitsPerDay) },
   iskPerDay: { label: 'Est. ISK/day', align: 'right', render: (r) => formatISK(r.iskPerDay) },
+  // History columns — the moving-average window is whatever the report asked for.
+  verdict: { label: 'Verdict', render: (r) => <VerdictBadge verdict={r.verdict} /> },
+  maRate: { label: 'Sold/day (MA)', align: 'right', render: (r) => formatRate(r.maPerDay) },
+  periodRate: { label: 'Sold/day (period)', align: 'right', render: (r) => formatRate(r.periodPerDay) },
+  volumeTrend: {
+    label: 'Vol trend',
+    align: 'right',
+    render: (r) => <span className={deltaClass(r.volumeTrendPct)}>{formatPct(r.volumeTrendPct, { signed: true })}</span>,
+  },
+  maPrice: { label: 'Sell (MA)', align: 'right', render: (r) => formatISK(r.maPrice) },
+  priceTrend: {
+    label: 'Price trend',
+    align: 'right',
+    render: (r) => <span className={deltaClass(r.priceTrendPct)}>{formatPct(r.priceTrendPct, { signed: true })}</span>,
+  },
+  lastSale: {
+    label: 'Last sale',
+    align: 'right',
+    render: (r) => (r.daysSinceSale == null ? 'Never' : r.daysSinceSale === 0 ? 'Today' : `${r.daysSinceSale}d ago`),
+  },
+  historyCover: { label: 'Days left', align: 'right', render: (r) => formatDays(r.historyCover) },
+  outOfStock: { label: 'Days sold out', align: 'right', render: (r) => formatQty(r.daysOutOfStock) },
+  jitaRate: { label: 'Jita sold/day (MA)', align: 'right', render: (r) => formatRate(r.jitaMaPerDay) },
 };
 
 function toCsv(rows, columnKeys) {
@@ -90,6 +115,13 @@ function toCsv(rows, columnKeys) {
         case 'split': return r.buySellSplit ?? '';
         case 'lineCost': return (r.restockQuantity ?? 0) * (r.jitaBestSell ?? r.bestSell ?? 0);
         case 'iskTiedUp': return r.iskTiedUp ?? '';
+        case 'maRate': return r.maPerDay ?? '';
+        case 'periodRate': return r.periodPerDay ?? '';
+        case 'volumeTrend': return r.volumeTrendPct ?? '';
+        case 'priceTrend': return r.priceTrendPct ?? '';
+        case 'lastSale': return r.daysSinceSale ?? '';
+        case 'outOfStock': return r.daysOutOfStock ?? '';
+        case 'jitaRate': return r.jitaMaPerDay ?? '';
         default: return r[k] ?? '';
       }
     });
@@ -106,6 +138,37 @@ async function copyText(text, label) {
   } catch {
     toast.error('Clipboard is unavailable in this browser context.');
   }
+}
+
+/** The report's own filters: number boxes and fixed-choice selectors. */
+function FilterControls({ filters, params, setParams }) {
+  return (filters ?? []).map((f) => (
+    <label key={f.key} className="flex items-center gap-2 text-xs text-slate-400">
+      {f.label}
+      {f.type === 'select' ? (
+        <Select value={String(params[f.key] ?? f.default)} onValueChange={(v) => setParams((p) => ({ ...p, [f.key]: v }))}>
+          <SelectTrigger className="w-28 h-8 bg-slate-900 border-slate-800 text-slate-200">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-[#0D1829] border-[#1E2D45]">
+            {f.options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Input
+          type="number"
+          min="0"
+          value={params[f.key] ?? ''}
+          onChange={(e) => setParams((p) => ({ ...p, [f.key]: e.target.value }))}
+          className="w-24 h-8 bg-slate-900 border-slate-800 tnum"
+        />
+      )}
+    </label>
+  ));
 }
 
 /** Poll status and SDE builds — a different shape from the item reports. */
@@ -188,20 +251,24 @@ function HealthView({ data }) {
   );
 }
 
-export function ReportDialog({ report, open, onOpenChange }) {
+export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
   const { addItems } = useCart();
   const [search, setSearch] = useState('');
   const [params, setParams] = useState({});
+  const [pickedItem, setPickedItem] = useState(null);
   const debouncedSearch = useDebounced(search);
+  const isHistory = report?.kind === 'history';
 
   // Reset filters when a different report opens, so the previous report's
-  // window doesn't silently carry over.
+  // window doesn't silently carry over. A drill-down passes initialParams to
+  // keep its period and average on purpose.
   useEffect(() => {
     if (!report) return;
     const defaults = {};
-    for (const f of report.filters ?? []) defaults[f.key] = f.default;
+    for (const f of report.filters ?? []) defaults[f.key] = report.initialParams?.[f.key] ?? f.default;
     setParams(defaults);
     setSearch('');
+    setPickedItem(report.initialItem ?? null);
   }, [report]);
 
   const { data, isLoading } = useQuery({
@@ -212,7 +279,8 @@ export function ReportDialog({ report, open, onOpenChange }) {
       if (payload.minAbsPct != null) payload.minAbsPct = Number(payload.minAbsPct) / 100;
       return api.invoke(report.handler, payload);
     },
-    enabled: open && !!report,
+    // The item history runs its own query once an item is picked.
+    enabled: open && !!report && !isHistory,
   });
 
   const columnKeys = report?.columns ?? [];
@@ -244,6 +312,7 @@ export function ReportDialog({ report, open, onOpenChange }) {
 
   if (!report) return null;
   const isHealth = report.kind === 'health';
+  const filterControls = <FilterControls filters={report.filters} params={params} setParams={setParams} />;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -259,9 +328,13 @@ export function ReportDialog({ report, open, onOpenChange }) {
           </div>
         )}
 
+        {isHistory && (
+          <ItemHistoryView params={params} picked={pickedItem} onPick={setPickedItem} controls={filterControls} />
+        )}
+
         {!isLoading && data && isHealth && <HealthView data={data} />}
 
-        {!isLoading && data && !isHealth && (
+        {!isLoading && data && !isHealth && !isHistory && (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -271,18 +344,7 @@ export function ReportDialog({ report, open, onOpenChange }) {
                 className="flex-1 min-w-[200px] bg-slate-900 border-slate-800 text-slate-200"
               />
 
-              {(report.filters ?? []).map((f) => (
-                <label key={f.key} className="flex items-center gap-2 text-xs text-slate-400">
-                  {f.label}
-                  <Input
-                    type="number"
-                    min="0"
-                    value={params[f.key] ?? ''}
-                    onChange={(e) => setParams((p) => ({ ...p, [f.key]: e.target.value }))}
-                    className="w-24 h-8 bg-slate-900 border-slate-800 tnum"
-                  />
-                </label>
-              ))}
+              {filterControls}
 
               <Button
                 size="sm"
@@ -328,6 +390,10 @@ export function ReportDialog({ report, open, onOpenChange }) {
               {data.summary?.totalIsk != null && ` · ${formatISK(data.summary.totalIsk)} traded`}
               {data.summary?.iskPerDay != null && ` · ${formatISK(data.summary.iskPerDay)}/day moved`}
               {!!data.summary?.soldOut && ` · ${data.summary.soldOut} sold out`}
+              {data.summary?.counts &&
+                ` · ${data.summary.counts.seed} to seed · ${data.summary.counts.stale} stale · ${data.summary.counts.ok} moving`}
+              {data.summary?.coveredDays != null && ` · ${data.summary.coveredDays} polled days`}
+              {data.summary?.maDays != null && ` · ${data.summary.maDays}-day MA`}
             </div>
 
             {chartData.length > 0 && (
@@ -368,7 +434,12 @@ export function ReportDialog({ report, open, onOpenChange }) {
                     </TableRow>
                   )}
                   {rows.map((r) => (
-                    <TableRow key={r.typeId} className="border-slate-800">
+                    <TableRow
+                      key={r.typeId}
+                      className={cn('border-slate-800', report.opensHistory && 'cursor-pointer hover:bg-slate-800/40')}
+                      onClick={report.opensHistory ? () => onOpenItem?.({ typeId: r.typeId, name: r.itemName }, params) : undefined}
+                      title={report.opensHistory ? 'Open item history' : undefined}
+                    >
                       <TableCell className="text-slate-200">
                         <div className="flex items-center gap-2">
                           <img

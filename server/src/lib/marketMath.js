@@ -147,6 +147,48 @@ export function withMovingAverage(series, windowDays, valueKey) {
 }
 
 /**
+ * Trailing mean over the last `windowDays` points that ignores gaps.
+ *
+ * Unlike withMovingAverage, a null value is skipped rather than counted as
+ * zero — a day with no ask on the market has no price, and averaging it in as
+ * 0 ISK would drag the line to the floor. The result is null until a window
+ * holds at least one real value. Written to `outKey`, so a chart can plot the
+ * average under a fixed name whatever window was picked.
+ */
+export function withTrailingMean(series, windowDays, valueKey, outKey = `${valueKey}MA`) {
+  const size = Math.max(1, Math.floor(windowDays) || 1);
+  return series.map((point, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let j = Math.max(0, i - size + 1); j <= i; j += 1) {
+      const v = series[j][valueKey];
+      if (v == null || !Number.isFinite(v)) continue;
+      sum += v;
+      n += 1;
+    }
+    return { ...point, [outKey]: n > 0 ? sum / n : null };
+  });
+}
+
+/**
+ * Sorts one item's history into what to do about it:
+ *   seed  - it sells, and stock is gone or won't last `targetDays`
+ *   stale - stock is sitting there and nothing has sold for `staleDays`
+ *   ok    - stocked and moving
+ *   idle  - nothing listed and nothing sold; no evidence either way
+ *
+ * "seed" is checked first: an item that sells but is sold out is the most
+ * useful thing this can point at.
+ */
+export function classifyHistory({ ratePerDay, sellVolume, daysSinceSale, targetDays, staleDays }) {
+  const stock = sellVolume || 0;
+  if (ratePerDay > 0 && (stock <= 0 || stock / ratePerDay < targetDays)) return 'seed';
+  if (stock > 0 && (daysSinceSale == null || daysSinceSale >= staleDays)) return 'stale';
+  if (stock > 0) return 'ok';
+  return 'idle';
+}
+
+/**
  * Groups one side of an order book into price levels for a depth ladder.
  *
  * groupPct === 0 keeps every distinct price; otherwise prices are bucketed

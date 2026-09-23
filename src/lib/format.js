@@ -108,6 +108,14 @@ export const STATUS_META = {
   ok: { label: 'OK', badge: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30', dot: 'bg-emerald-500' },
 };
 
+// History-report verdicts: what the stored history says to do about an item.
+export const VERDICT_META = {
+  seed: { label: 'Seed', badge: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
+  stale: { label: 'Stale', badge: 'bg-slate-700/40 text-slate-300 border border-slate-600/40' },
+  ok: { label: 'Moving', badge: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
+  idle: { label: 'Idle', badge: 'bg-slate-800/60 text-slate-500 border border-slate-700/40' },
+};
+
 export const EVENT_META = {
   new: { label: 'New order', className: 'text-sky-400' },
   fill: { label: 'Filled', className: 'text-emerald-400' },

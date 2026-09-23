@@ -20,6 +20,7 @@ const functionsRouter = (await import('./routes/functions.js')).default;
 const sdeRouter = (await import('./routes/sde/index.js')).default;
 const { ensureConfiguredSource, startMarketPoller } = await import('./lib/marketPoller.js');
 const { startSdeScheduler } = await import('./lib/sdeScheduler.js');
+const { startJitaHistoryPoller } = await import('./lib/jitaHistoryPoller.js');
 
 const app = express();
 
@@ -59,6 +60,7 @@ ensureConfiguredSource()
   .then(() => {
     startMarketPoller();
     startSdeScheduler();
+    startJitaHistoryPoller();
     // Tracked items saved under a non-market duplicate name never price;
     // point them at the real item. Failing here mustn't stop anything else.
     repairWatchItemTypes().catch((err) => console.error('[watchlist] type repair failed:', err.message));

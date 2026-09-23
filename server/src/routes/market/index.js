@@ -287,7 +287,6 @@ async function getMarketOverview({ structureId } = {}) {
       lastPollStatus: source.lastPollStatus,
       lastPollError: source.lastPollError,
       pollIntervalMinutes: source.pollIntervalMinutes,
-      retentionDays: source.retentionDays,
     },
     sources: sources.map((s) => ({ id: s.id, structureId: s.structureId, name: s.name, isPrimary: s.isPrimary })),
     distinctItems: listedTypes.length,

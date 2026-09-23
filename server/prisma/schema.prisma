@@ -145,7 +145,6 @@ model MarketSource {
   enabled             Boolean @default(true)
   isPrimary           Boolean @default(false)
   pollIntervalMinutes Int     @default(15)
-  retentionDays       Int     @default(180)
 
   lastPolledAt   DateTime?
   lastPollStatus String    @default("pending") // pending | ok | error
@@ -156,6 +155,10 @@ model MarketSource {
 // The current order book — one row per live order, replaced in place each
 // poll and deleted when an order leaves the book. History lives in
 // MarketOrderArchive / MarketOrderEvent / MarketDailyStat, never here.
+//
+// Nothing in the history tables is ever pruned: every event, daily stat and
+// snapshot is kept indefinitely, so the history reports can reach back to the
+// first poll. Only removing a market source deletes its data.
 model MarketOrder {
   id           String   @id @default(uuid())
   created_date DateTime @default(now())
@@ -182,7 +185,7 @@ model MarketOrder {
 
 // The permanent record of every order that has ever left the book, written at
 // the moment it disappears. MarketOrder only mirrors the *current* book, so
-// this is what makes the order history durable. Never pruned by retention.
+// this is what makes the order history durable.
 model MarketOrderArchive {
   id String @id @default(uuid())
 
@@ -322,13 +325,16 @@ model ReferencePrice {
   fetchedAt  DateTime @default(now())
 }
 
-// Jita daily history from ESI's region history endpoint, cached per
-// (typeId, date). Unlike structure markets, The Forge *does* publish real
-// history — this is stored rather than re-fetched so reports and charts can
-// join against it cheaply.
+// Jita daily history from ESI's region history endpoint for The Forge, one
+// row per (typeId, date), for every type traded in the region — not just the
+// ones this citadel lists. Unlike structure markets, The Forge *does* publish
+// real history; ESI only serves about the last 13 months of it, so storing it
+// is the only way to keep anything older. Never pruned.
+//
+// Keyed on (typeId, date) with no surrogate id: at ~15k types a day this is
+// by far the largest table, and a uuid column plus its index would roughly
+// double its size for nothing.
 model ReferenceDailyStat {
-  id String @id @default(uuid())
-
   typeId     Int
   date       DateTime
   average    Float?
@@ -338,8 +344,18 @@ model ReferenceDailyStat {
   orderCount Float    @default(0)
   fetchedAt  DateTime @default(now())
 
-  @@unique([typeId, date])
-  @@index([typeId, date])
+  @@id([typeId, date])
+}
+
+// When each type's Jita history was last pulled, so a sweep interrupted by a
+// restart resumes where it stopped rather than starting over, and a type
+// already fetched since ESI's daily update isn't requested again.
+model ReferenceHistoryFetch {
+  typeId    Int      @id
+  fetchedAt DateTime
+  lastDate  DateTime?
+  // ESI answered 404/empty: the type has no regional history.
+  empty     Boolean  @default(false)
 }
 
 // ─────────────────────────────────────────────────────────────────────────

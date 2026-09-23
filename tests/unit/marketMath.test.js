@@ -3,6 +3,7 @@ import {
   avgDailyVolume,
   buildDailyLookup,
   buySellSplit,
+  classifyHistory,
   daysOfCover,
   effectiveMinimum,
   groupOrdersIntoLadder,
@@ -11,6 +12,7 @@ import {
   vsReferencePct,
   watchStatus,
   withMovingAverage,
+  withTrailingMean,
 } from '../../server/src/lib/marketMath.js';
 
 const NOW = new Date('2026-09-20T12:00:00.000Z');
@@ -228,5 +230,44 @@ describe('groupOrdersIntoLadder', () => {
 
   it('returns an empty ladder for a side with no orders', () => {
     expect(groupOrdersIntoLadder([], { isBuy: true })).toEqual([]);
+  });
+});
+
+describe('withTrailingMean', () => {
+  it('averages the trailing window under a fixed key', () => {
+    const out = withTrailingMean([{ v: 2 }, { v: 4 }, { v: 6 }, { v: 8 }], 2, 'v');
+    expect(out.map((p) => p.vMA)).toEqual([2, 3, 5, 7]);
+  });
+
+  it('skips gaps instead of counting them as zero', () => {
+    const out = withTrailingMean([{ v: 10 }, { v: null }, { v: 20 }], 3, 'v');
+    expect(out.map((p) => p.vMA)).toEqual([10, 10, 15]);
+  });
+
+  it('is null until the window holds a real value', () => {
+    const out = withTrailingMean([{ v: null }, { v: 5 }], 7, 'v', 'avg');
+    expect(out.map((p) => p.avg)).toEqual([null, 5]);
+  });
+});
+
+describe('classifyHistory', () => {
+  const base = { targetDays: 14, staleDays: 14 };
+
+  it('flags an item that sells but is sold out as seed', () => {
+    expect(classifyHistory({ ...base, ratePerDay: 5, sellVolume: 0, daysSinceSale: 1 })).toBe('seed');
+  });
+
+  it('flags an item whose stock will not last the target as seed', () => {
+    expect(classifyHistory({ ...base, ratePerDay: 10, sellVolume: 50, daysSinceSale: 0 })).toBe('seed');
+  });
+
+  it('flags listed stock with no recent sale as stale', () => {
+    expect(classifyHistory({ ...base, ratePerDay: 0, sellVolume: 100, daysSinceSale: 30 })).toBe('stale');
+    expect(classifyHistory({ ...base, ratePerDay: 0, sellVolume: 100, daysSinceSale: null })).toBe('stale');
+  });
+
+  it('calls stocked, moving items ok and empty, unsold ones idle', () => {
+    expect(classifyHistory({ ...base, ratePerDay: 1, sellVolume: 100, daysSinceSale: 2 })).toBe('ok');
+    expect(classifyHistory({ ...base, ratePerDay: 0, sellVolume: 0, daysSinceSale: null })).toBe('idle');
   });
 });

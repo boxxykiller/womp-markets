@@ -5,15 +5,43 @@ import {
   ArrowLeftRight,
   FileBarChart,
   HeartPulse,
+  LineChart as LineChartIcon,
   PackageSearch,
   PackageX,
   Scale,
   Sparkles,
+  Sprout,
   TrendingUp,
 } from 'lucide-react';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ReportDialog } from '@/components/market/ReportDialog';
 import { cn } from '@/lib/utils';
+
+// Period and moving-average choices for the history reports. Market data is
+// never pruned, so "All time" reaches back to the first poll.
+const PERIOD_OPTIONS = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '180', label: '180 days' },
+  { value: '365', label: '1 year' },
+  { value: '0', label: 'All time' },
+];
+
+const MA_OPTIONS = [
+  { value: '3', label: '3-day' },
+  { value: '7', label: '7-day' },
+  { value: '14', label: '14-day' },
+  { value: '30', label: '30-day' },
+];
+
+const VERDICT_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'seed', label: 'Seed' },
+  { value: 'stale', label: 'Stale' },
+  { value: 'ok', label: 'Moving' },
+  { value: 'idle', label: 'Idle' },
+];
 
 // Each report is a handler name plus how its dialog should present the rows.
 // Keeping the definitions declarative means adding a report is one entry here
@@ -103,6 +131,38 @@ const REPORTS = [
     multibuy: true,
   },
   {
+    key: 'seeding',
+    handler: 'reportSeedingHistory',
+    title: 'Seed or stale',
+    description: 'Every item judged on its stored history: what sells but is running dry, and what sits unsold.',
+    icon: Sprout,
+    accent: 'amber',
+    columns: ['verdict', 'volume', 'maRate', 'periodRate', 'volumeTrend', 'maPrice', 'priceTrend', 'jitaRate', 'lastSale', 'historyCover', 'restock', 'lineCost', 'iskTiedUp'],
+    chart: 'periodIsk',
+    filters: [
+      { key: 'days', label: 'Period', type: 'select', options: PERIOD_OPTIONS, default: '30' },
+      { key: 'maDays', label: 'Moving avg', type: 'select', options: MA_OPTIONS, default: '7' },
+      { key: 'verdict', label: 'Show', type: 'select', options: VERDICT_OPTIONS, default: 'all' },
+      { key: 'targetDays', label: 'Target days of cover', type: 'number', default: 14 },
+      { key: 'staleDays', label: 'Stale after (days)', type: 'number', default: 14 },
+    ],
+    multibuy: true,
+    opensHistory: true,
+  },
+  {
+    key: 'history',
+    handler: 'reportItemHistory',
+    title: 'Item history',
+    description: "One item's daily volume, price and stock over any period, beside Jita's, with a moving average over each.",
+    icon: LineChartIcon,
+    accent: 'blue',
+    kind: 'history',
+    filters: [
+      { key: 'days', label: 'Period', type: 'select', options: PERIOD_OPTIONS, default: '90' },
+      { key: 'maDays', label: 'Moving avg', type: 'select', options: MA_OPTIONS, default: '7' },
+    ],
+  },
+  {
     key: 'health',
     handler: 'reportDataHealth',
     title: 'Poll & data health',
@@ -156,7 +216,17 @@ export default function Reports() {
         })}
       </div>
 
-      <ReportDialog report={active} open={!!active} onOpenChange={(v) => !v && setActive(null)} />
+      <ReportDialog
+        report={active}
+        open={!!active}
+        onOpenChange={(v) => !v && setActive(null)}
+        // A row in a history-backed report drills into that item's history,
+        // carrying the same period and average across.
+        onOpenItem={(item, params) => {
+          const history = REPORTS.find((r) => r.key === 'history');
+          setActive({ ...history, initialItem: item, initialParams: { days: params.days, maDays: params.maDays } });
+        }}
+      />
     </Page>
   );
 }

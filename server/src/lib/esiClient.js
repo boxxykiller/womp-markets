@@ -36,7 +36,12 @@ export async function esiFetch(path, { token, method = 'GET', body, params } = {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`ESI ${res.status} ${path}: ${text}`);
+    const err = new Error(`ESI ${res.status} ${path}: ${text}`);
+    // Kept on the error so bulk callers can back off on 420/429 instead of
+    // burning through the error budget.
+    err.status = res.status;
+    err.headers = res.headers;
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();

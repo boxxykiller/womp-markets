@@ -128,8 +128,8 @@ allowlist, and needs no database.
 
 The integration suite drives the poller against scripted order-book snapshots and asserts every
 branch of the diff — including that a missed-tick gap attributes no fills, that inferred volume
-never lands in the confirmed column, and that the order archive survives a retention sweep that
-prunes everything else. It needs `DATABASE_URL_TEST`; without it those tests skip so `npm test`
+never lands in the confirmed column, and that every vanished order is archived with the volumes
+needed to tell how much of it traded. It needs `DATABASE_URL_TEST`; without it those tests skip so `npm test`
 still works on a bare checkout.
 
 ```bash
@@ -156,11 +156,17 @@ lint, tests and build alongside it but does not gate the deploy.
 Full server setup, the GitHub secrets it needs and troubleshooting are in
 [docs/DEPLOY.md](docs/DEPLOY.md).
 
-## Data retention
+## Data history
 
-`retentionDays` (default 180) prunes the event feed, daily stats and stock snapshots.
-**`MarketOrderArchive` is never pruned** — it's the permanent record of every order that has passed
-through the citadel, and outliving the retention window is the entire point of it.
+All market data is kept indefinitely. Nothing prunes the event feed, daily stats, stock snapshots,
+Jita history or the order archive, so the history reports can reach back to the very first poll.
+Deleting a market source from Settings is the only thing that removes its data.
+
+Jita history is kept the same way, for every item traded in The Forge, not just the ones the
+citadel lists. ESI only serves about 13 months of regional history, so once a day after downtime
+a sweep requests each type (~15k requests, paced by `JITA_HISTORY_REQUESTS_PER_MINUTE`, default
+200) and stores the days it doesn't have yet. The first sweep backfills the full 13 months and takes
+well over an hour; later ones only add the new day. Progress shows under Settings → Jita history.
 
 ## Notes
 

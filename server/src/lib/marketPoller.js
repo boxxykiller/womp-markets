@@ -27,7 +27,6 @@ import { ensureFreshToken } from './eveSso.js';
 import { runReferenceRefresh } from './referencePricePoller.js';
 
 let pollTimer = null;
-let cleanupTimer = null;
 const inFlight = new Set();
 
 // Seeds the configured citadel when MARKET_STRUCTURE_ID is set. With no env
@@ -48,7 +47,6 @@ export async function ensureConfiguredSource() {
       readerCharacterName: String(process.env.MARKET_READER_CHARACTER || '').trim() || null,
       isPrimary: true,
       pollIntervalMinutes: Number(process.env.MARKET_POLL_INTERVAL_MINUTES) || 15,
-      retentionDays: Number(process.env.MARKET_RETENTION_DAYS) || 180,
     },
   });
   console.log(`[market] Seeded market source from environment: ${structureId}`);
@@ -513,21 +511,6 @@ async function recordWatchedSnapshots(structureId, aggByType, now) {
   await prisma.marketSnapshot.createMany({ data });
 }
 
-// Prunes the derived, re-derivable series. MarketOrderArchive is deliberately
-// excluded: it is the permanent order history and the whole point of keeping
-// it is that it outlives the retention window.
-export async function cleanupExpiredHistory() {
-  const sources = await prisma.marketSource.findMany();
-  for (const s of sources) {
-    const cutoff = new Date(Date.now() - s.retentionDays * 86400000);
-    await Promise.all([
-      prisma.marketOrderEvent.deleteMany({ where: { structureId: s.structureId, occurredAt: { lt: cutoff } } }),
-      prisma.marketDailyStat.deleteMany({ where: { structureId: s.structureId, date: { lt: cutoff } } }),
-      prisma.marketSnapshot.deleteMany({ where: { structureId: s.structureId, takenAt: { lt: cutoff } } }),
-    ]);
-  }
-}
-
 // Ticks every minute and polls whichever sources are due, so each source's
 // own interval is honoured independently rather than every source sharing one
 // global period.
@@ -550,18 +533,10 @@ export function startMarketPoller() {
   if (pollTimer) return;
   tick();
   pollTimer = setInterval(tick, 60 * 1000);
-
-  cleanupExpiredHistory().catch((err) => console.error('[market] cleanup failed:', err.message));
-  cleanupTimer = setInterval(
-    () => cleanupExpiredHistory().catch((err) => console.error('[market] cleanup failed:', err.message)),
-    24 * 60 * 60 * 1000,
-  );
   console.log('[market] poller started');
 }
 
 export function stopMarketPoller() {
   if (pollTimer) clearInterval(pollTimer);
-  if (cleanupTimer) clearInterval(cleanupTimer);
   pollTimer = null;
-  cleanupTimer = null;
 }

@@ -7,6 +7,7 @@ import { ensureFreshToken } from '../../lib/eveSso.js';
 import { getSdeStatus } from '../../lib/sdeIngest.js';
 import { getLastCheck, runSdeCheck } from '../../lib/sdeScheduler.js';
 import { runReferenceRefresh } from '../../lib/referencePricePoller.js';
+import { getJitaHistoryStatus, runJitaHistorySweep } from '../../lib/jitaHistoryPoller.js';
 
 async function listMarketSources() {
   const sources = await prisma.marketSource.findMany({ orderBy: [{ isPrimary: 'desc' }, { created_date: 'asc' }] });
@@ -23,7 +24,6 @@ async function saveMarketSource(body = {}) {
     enabled,
     isPrimary,
     pollIntervalMinutes,
-    retentionDays,
   } = body;
 
   if (!id && !structureId) throw new HttpError(400, 'structureId required');
@@ -38,7 +38,6 @@ async function saveMarketSource(body = {}) {
         // tick and burns ESI budget for no extra fidelity.
         { pollIntervalMinutes: Math.max(1, Number(pollIntervalMinutes) || 15) }
       : {}),
-    ...(retentionDays !== undefined ? { retentionDays: Math.max(1, Number(retentionDays) || 180) } : {}),
   };
 
   const source = id
@@ -113,7 +112,7 @@ async function searchStructures({ search } = {}, req) {
 // Everything the Settings page shows in one call, so it renders in one paint
 // rather than four staggered ones.
 async function getSystemStatus() {
-  const [sdeStatus, lastCheck, sources, referenceCount, latestReference, fuzzworkCount, esiCount] = await Promise.all([
+  const [sdeStatus, lastCheck, sources, referenceCount, latestReference, fuzzworkCount, esiCount, jitaHistory] = await Promise.all([
     getSdeStatus(),
     getLastCheck(),
     prisma.marketSource.findMany({ orderBy: [{ isPrimary: 'desc' }] }),
@@ -121,6 +120,7 @@ async function getSystemStatus() {
     prisma.referencePrice.findFirst({ orderBy: { fetchedAt: 'desc' }, select: { fetchedAt: true } }),
     prisma.referencePrice.count({ where: { source: 'fuzzwork' } }),
     prisma.referencePrice.count({ where: { source: 'esi' } }),
+    getJitaHistoryStatus(),
   ]);
 
   return {
@@ -132,6 +132,7 @@ async function getSystemStatus() {
       bySource: { fuzzwork: fuzzworkCount, esi: esiCount },
       configuredSource: process.env.JITA_PRICE_SOURCE || 'fuzzwork',
     },
+    jitaHistory,
     env: {
       // Reported so an operator can see whether the source came from the
       // environment or was created through the wizard.
@@ -150,6 +151,16 @@ async function refreshJitaPrices() {
   return runReferenceRefresh();
 }
 
+// A full sweep takes over an hour, so this starts it and returns at once;
+// the Settings page follows progress through getSystemStatus.
+async function refreshJitaHistory() {
+  const status = await getJitaHistoryStatus();
+  if (status.running) return { started: false, reason: 'already running' };
+  if (!status.requestsPerMinute) return { started: false, reason: 'disabled (JITA_HISTORY_REQUESTS_PER_MINUTE is 0)' };
+  runJitaHistorySweep({ trigger: 'manual' }).catch(() => {});
+  return { started: true };
+}
+
 export const settingsHandlers = {
   listMarketSources: { fn: listMarketSources, auth: 'auth' },
   getSystemStatus: { fn: getSystemStatus, auth: 'auth' },
@@ -158,4 +169,5 @@ export const settingsHandlers = {
   searchStructures: { fn: searchStructures, auth: 'admin' },
   refreshSde: { fn: refreshSde, auth: 'admin' },
   refreshJitaPrices: { fn: refreshJitaPrices, auth: 'admin' },
+  refreshJitaHistory: { fn: refreshJitaHistory, auth: 'admin' },
 };
