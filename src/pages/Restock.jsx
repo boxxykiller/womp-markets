@@ -55,10 +55,10 @@ function readSettings() {
 // Buy side:  Net Buy  = Jita Buy + buy broker fee + shipping
 //            shipping = m³ × rate  +  collateral fee (a % of the Jita Sell
 //            value, which is what a courier contract is collateralised at)
-// Sell side: list price = Jita Sell + markup (the only addition)
-//            Net Sell   = list price − sell broker fee − SCC surcharge
-//                         − sales tax, each charged on the list price
-//            — what the sale actually puts in your wallet
+// Sell side: after fees = Jita Sell − sell broker fee − SCC surcharge
+//                         − sales tax, each charged on the Jita sell price
+//            Net Sell   = after fees + markup (a % of Jita Sell)
+//            list price = Jita Sell + markup — what to put the order up at
 // Profit:    Net Sell − Net Buy
 
 function calcItem(item, s) {
@@ -74,19 +74,20 @@ function calcItem(item, s) {
   const collateralFee = sell * (s.collateralPct / 100);
   const netBuy = buy + brokerBuy + freight + collateralFee;
 
-  const markup = sell * (s.markupPct / 100);
-  const listPrice = sell + markup;
-  const brokerSell = listPrice * (s.sellBrokerFee / 100);
-  const scc = listPrice * (s.sccSurcharge / 100);
-  const tax = listPrice * (s.salesTax / 100);
+  const brokerSell = sell * (s.sellBrokerFee / 100);
+  const scc = sell * (s.sccSurcharge / 100);
+  const tax = sell * (s.salesTax / 100);
   const sellFees = brokerSell + scc + tax;
-  const netSell = listPrice - sellFees;
+  const afterFees = sell - sellFees;
+  const markup = sell * (s.markupPct / 100);
+  const netSell = afterFees + markup;
+  const listPrice = sell + markup;
 
   const profit = netSell - netBuy;
 
   const unit = {
     grossBuy: buy, grossSell: sell, brokerBuy, freight, collateralFee, netBuy,
-    markup, listPrice, brokerSell, scc, tax, sellFees, netSell, profit,
+    brokerSell, scc, tax, sellFees, afterFees, markup, listPrice, netSell, profit,
   };
   const line = Object.fromEntries(Object.entries(unit).map(([k, v]) => [k, v * qty]));
   return { qty, m3: m3 * qty, collateral: sell * qty, unit, line, missing: item.jitaBestBuy == null && item.jitaBestSell == null };
@@ -372,7 +373,7 @@ export default function Restock() {
   const multibuyText = useMemo(() => formatMultibuy(items), [items]);
 
   // "Item Name<TAB>price" per line: the list price per unit (Jita sell +
-  // markup) — what to put each sell order up at; fees come out of it after.
+  // markup) — what to put each sell order up at.
   // Same items as the multibuy (quantity above 0), and plain numbers with no
   // separators so it pastes cleanly into a spreadsheet.
   const priceSheetText = useMemo(
@@ -461,7 +462,7 @@ export default function Restock() {
         <StatCard
           title="Net Sell"
           value={formatISK(totals.netSell)}
-          subtitle={`Jita sell + ${settings.markupPct}% markup, less sell fees`}
+          subtitle={`Jita sell less sell fees, + ${settings.markupPct}% markup`}
           variant="blue"
         />
         <StatCard
@@ -570,11 +571,11 @@ export default function Restock() {
 
             <Receipt title="Sell side">
               <Line label="Gross Sell" hint="Jita sell" value={totals.grossSell} />
-              <Line label="Markup" hint={`${settings.markupPct}%`} value={totals.markup} sign="+" />
-              <Line label="List price" value={totals.listPrice} total />
               <Line label="Sell broker fee" hint={`${settings.sellBrokerFee}%`} value={totals.brokerSell} sign="−" />
               <Line label="SCC surcharge" hint={`${settings.sccSurcharge}%`} value={totals.scc} sign="−" />
               <Line label="Sales tax" hint={`${settings.salesTax}%`} value={totals.tax} sign="−" />
+              <Line label="After fees" value={totals.afterFees} total />
+              <Line label="Markup" hint={`${settings.markupPct}%`} value={totals.markup} sign="+" />
               <Line label="Net Sell" value={totals.netSell} total tone="text-sky-400" />
               <Line
                 label="Profit"
@@ -736,7 +737,7 @@ export default function Restock() {
                     </td>
                     <td
                       className="px-2 text-right tnum text-sky-400"
-                      title={`${formatISKFull(x.netSell)} — list ${formatISK(x.listPrice)} (Jita sell + ${formatISK(x.markup)} markup), less broker ${formatISK(x.brokerSell)}, SCC ${formatISK(x.scc)}, tax ${formatISK(x.tax)}`}
+                      title={`${formatISKFull(x.netSell)} — Jita sell less broker ${formatISK(x.brokerSell)}, SCC ${formatISK(x.scc)}, tax ${formatISK(x.tax)}, + ${formatISK(x.markup)} markup`}
                     >
                       {formatISK(x.netSell)}
                     </td>
