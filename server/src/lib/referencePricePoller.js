@@ -23,6 +23,9 @@ import { esiFetch, mapWithConcurrency } from './esiClient.js';
 // Jita IV - Moon 4 - Caldari Navy Assembly Plant, in The Forge.
 export const JITA_STATION_ID = 60003760;
 export const THE_FORGE_REGION_ID = 10000002;
+// Amarr VIII (Oris) - Emperor Family Academy, in Domain.
+export const AMARR_STATION_ID = 60008494;
+export const DOMAIN_REGION_ID = 10000043;
 
 const FUZZWORK_URL = 'https://market.fuzzwork.co.uk/aggregates/';
 
@@ -72,8 +75,8 @@ export function parseFuzzworkEntry(typeId, entry) {
   };
 }
 
-export async function fetchFuzzworkChunk(typeIds, { fetchImpl = fetch } = {}) {
-  const url = `${FUZZWORK_URL}?station=${JITA_STATION_ID}&types=${typeIds.join(',')}`;
+export async function fetchFuzzworkChunk(typeIds, { fetchImpl = fetch, stationId = JITA_STATION_ID } = {}) {
+  const url = `${FUZZWORK_URL}?station=${stationId}&types=${typeIds.join(',')}`;
   // A deadline so a stalled Fuzzwork falls through to ESI instead of hanging
   // the whole refresh.
   const res = await fetchImpl(url, {
@@ -97,11 +100,11 @@ export async function fetchFuzzworkChunk(typeIds, { fetchImpl = fetch } = {}) {
  * the region" would quietly include a much worse price from a backwater
  * station and make the local market look better than it is.
  */
-export async function fetchEsiPrice(typeId) {
-  const orders = await esiFetch(`/markets/${THE_FORGE_REGION_ID}/orders/`, {
+export async function fetchEsiPrice(typeId, { regionId = THE_FORGE_REGION_ID, stationId = JITA_STATION_ID } = {}) {
+  const orders = await esiFetch(`/markets/${regionId}/orders/`, {
     params: { order_type: 'all', type_id: typeId },
   });
-  const atJita = (orders || []).filter((o) => String(o.location_id) === String(JITA_STATION_ID));
+  const atJita = (orders || []).filter((o) => String(o.location_id) === String(stationId));
   if (atJita.length === 0) return null;
 
   let bestBuy = null;

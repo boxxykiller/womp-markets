@@ -30,7 +30,11 @@ const DEFAULTS = {
   // Buy side priced off Jita sell orders (buy now) instead of Jita buy
   // orders (place an order and wait).
   buyAtJitaSell: false,
+  // Which market prices are compared against.
+  hub: 'jita',
 };
+
+const HUBS = { jita: 'Jita', amarr: 'Amarr' };
 
 function readSettings() {
   try {
@@ -100,7 +104,7 @@ function calcItem(item, s) {
  * orders); with no sell orders, CCP's universe-wide average stands in. Each
  * fallback is flagged so the table can mark it as an estimate.
  */
-function resolvePrices(raw, q) {
+function resolvePrices(raw, q, hubName = 'Jita') {
   const buy = q?.jitaBestBuy ?? raw.jitaBestBuy ?? null;
   const sell = q?.jitaBestSell ?? raw.jitaBestSell ?? null;
   const avg = q?.averagePrice ?? null;
@@ -112,8 +116,8 @@ function resolvePrices(raw, q) {
     volumePerUnit: q?.volumePerUnit ?? raw.volumePerUnit,
   };
   const est = {
-    buy: buy == null && item.jitaBestBuy != null ? (sell != null ? 'No Jita buy orders — using Jita sell' : 'No Jita orders — using CCP average price') : null,
-    sell: sell == null && item.jitaBestSell != null ? (avg != null ? 'No Jita sell orders — using CCP average price' : 'No Jita sell orders — using Jita buy') : null,
+    buy: buy == null && item.jitaBestBuy != null ? (sell != null ? `No ${hubName} buy orders — using ${hubName} sell` : `No ${hubName} orders — using CCP average price`) : null,
+    sell: sell == null && item.jitaBestSell != null ? (avg != null ? `No ${hubName} sell orders — using CCP average price` : `No ${hubName} sell orders — using ${hubName} buy`) : null,
   };
   return { item, est };
 }
@@ -299,6 +303,8 @@ export default function Restock() {
   }, [settings]);
 
   const set = (key) => (value) => setSettings((s) => ({ ...s, [key]: value }));
+  const hub = settings.hub === 'amarr' ? 'amarr' : 'jita';
+  const hubName = HUBS[hub];
 
   // Live Jita prices and packaged volume, rather than the snapshot stored when
   // each item was added — that snapshot is often empty and always ages. The
@@ -307,8 +313,8 @@ export default function Restock() {
   // overstates ships roughly tenfold.)
   const typeIds = useMemo(() => items.map((i) => i.typeId).sort((a, b) => a - b), [items]);
   const { data: quoteData, isFetching: quotesLoading, isError: quotesFailed } = useQuery({
-    queryKey: ['restock-quotes', typeIds],
-    queryFn: () => api.invoke('getRestockQuotes', { typeIds }),
+    queryKey: ['restock-quotes', typeIds, hub],
+    queryFn: () => api.invoke('getRestockQuotes', { typeIds, hub }),
     enabled: typeIds.length > 0,
     staleTime: 5 * 60_000,
     // The server answers within ~15s with whatever it has and keeps
@@ -333,10 +339,10 @@ export default function Restock() {
   const rows = useMemo(
     () =>
       items.map((raw) => {
-        const { item, est } = resolvePrices(raw, quoteData?.quotes?.[raw.typeId]);
+        const { item, est } = resolvePrices(raw, quoteData?.quotes?.[raw.typeId], hubName);
         return { item, est, c: calcItem(item, settings) };
       }),
-    [items, settings, quoteData],
+    [items, settings, quoteData, hubName],
   );
 
   const totals = useMemo(() => {
@@ -454,13 +460,13 @@ export default function Restock() {
         <StatCard
           title="Net Buy"
           value={formatISK(totals.netBuy)}
-          subtitle={`Landed cost: Jita ${settings.buyAtJitaSell ? 'sell' : 'buy'} + fees + shipping`}
+          subtitle={`Landed cost: ${hubName} ${settings.buyAtJitaSell ? 'sell' : 'buy'} + fees + shipping`}
           variant="amber"
         />
         <StatCard
           title="Net Sell"
           value={formatISK(totals.netSell)}
-          subtitle={`Jita sell + ${settings.markupPct}% markup, less sell fees`}
+          subtitle={`${hubName} sell + ${settings.markupPct}% markup, less sell fees`}
           variant="blue"
         />
         <StatCard
@@ -491,16 +497,28 @@ export default function Restock() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Inputs */}
           <div className="lg:col-span-4 grid grid-cols-2 gap-x-3 gap-y-4 content-start">
+            <label className="col-span-2 block">
+              <span className="block text-xs font-medium text-slate-400 mb-1.5">Compare prices against</span>
+              <select
+                value={hub}
+                onChange={(e) => set('hub')(e.target.value)}
+                className="h-9 w-full rounded-md bg-slate-950/60 border border-slate-700 px-3 text-sm text-slate-200 focus:outline-none focus:border-[#4A9EFF]"
+              >
+                <option value="jita">Jita</option>
+                <option value="amarr">Amarr</option>
+              </select>
+            </label>
+
             <div className="col-span-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 -mb-2">
               Buying
             </div>
             <label className="col-span-2 flex items-center justify-between gap-3 cursor-pointer">
               <span>
-                <span className="block text-sm text-slate-200">Buy at Jita sell</span>
+                <span className="block text-sm text-slate-200">Buy at {hubName} sell</span>
                 <span className="block text-xs text-slate-500">
                   {settings.buyAtJitaSell
                     ? 'Buying off sell orders now — no buy broker fee'
-                    : 'Placing buy orders at the Jita buy price'}
+                    : `Placing buy orders at the ${hubName} buy price`}
                 </span>
               </span>
               <button
@@ -545,7 +563,7 @@ export default function Restock() {
           {/* Breakdown */}
           <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
             <Receipt title="Buy side">
-              <Line label="Gross Buy" hint={settings.buyAtJitaSell ? 'Jita sell' : 'Jita buy'} value={totals.grossBuy} />
+              <Line label="Gross Buy" hint={settings.buyAtJitaSell ? `${hubName} sell` : `${hubName} buy`} value={totals.grossBuy} />
               <Line
                 label="Buy broker fee"
                 hint={settings.buyAtJitaSell ? 'none on instant buys' : `${settings.buyBrokerFee}%`}
@@ -568,7 +586,7 @@ export default function Restock() {
             </Receipt>
 
             <Receipt title="Sell side">
-              <Line label="Gross Sell" hint="Jita sell" value={totals.grossSell} />
+              <Line label="Gross Sell" hint={`${hubName} sell`} value={totals.grossSell} />
               <Line label="Markup" hint={`${settings.markupPct}%`} value={totals.markup} sign="+" />
               <Line label="List price" value={totals.listPrice} total />
               <Line label="Sell broker fee" hint={`${settings.sellBrokerFee}%`} value={totals.brokerSell} sign="−" />
@@ -586,14 +604,14 @@ export default function Restock() {
             <div className="md:col-span-2 space-y-1 text-xs">
               {quotesFailed && (
                 <p className="text-rose-400">
-                  Couldn&apos;t load live Jita prices — showing the prices saved when items were added.
+                  Couldn&apos;t load live {hubName} prices — showing the prices saved when items were added.
                 </p>
               )}
-              {quotesLoading && !quoteData && <p className="text-slate-500">Fetching live Jita prices…</p>}
+              {quotesLoading && !quoteData && <p className="text-slate-500">Fetching live {hubName} prices…</p>}
               {quoteData && totals.estimated > 0 && (
                 <p className="text-slate-500">
                   <span className="text-amber-400/80">≈</span> {totals.estimated} item
-                  {totals.estimated === 1 ? ' has' : 's have'} orders on only one side at Jita 4-4; the other side is
+                  {totals.estimated === 1 ? ' has' : 's have'} orders on only one side at {hubName}; the other side is
                   estimated (hover a ≈ price for its source).
                 </p>
               )}
@@ -735,7 +753,7 @@ export default function Restock() {
                     </td>
                     <td
                       className="px-2 text-right tnum text-sky-400"
-                      title={`${formatISKFull(x.netSell)} — list ${formatISK(x.listPrice)} (Jita sell + ${formatISK(x.markup)} markup), less broker ${formatISK(x.brokerSell)}, SCC ${formatISK(x.scc)}, tax ${formatISK(x.tax)}`}
+                      title={`${formatISKFull(x.netSell)} — list ${formatISK(x.listPrice)} (${hubName} sell + ${formatISK(x.markup)} markup), less broker ${formatISK(x.brokerSell)}, SCC ${formatISK(x.scc)}, tax ${formatISK(x.tax)}`}
                     >
                       {formatISK(x.netSell)}
                     </td>

@@ -11,7 +11,9 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { pollSource } from '../../lib/marketPoller.js';
 import { cacheWrap } from '../../lib/cache.js';
 import { esiFetch, mapWithConcurrency } from '../../lib/esiClient.js';
-import { fetchEsiPrice, refreshReferencePrices } from '../../lib/referencePricePoller.js';
+import {
+  AMARR_STATION_ID, DOMAIN_REGION_ID, chunk, fetchEsiPrice, fetchFuzzworkChunk, refreshReferencePrices,
+} from '../../lib/referencePricePoller.js';
 import {
   avgDailyVolume,
   buildDailyLookup,
@@ -663,7 +665,39 @@ const QUOTE_REFRESH_WAIT_MS = 15_000;
  * reached it. So the page asks here instead, and anything missing or stale is
  * fetched from Jita on the spot rather than waiting for the next poll.
  */
-async function getRestockQuotes({ typeIds } = {}) {
+// Amarr isn't polled into the database like Jita, so its prices are fetched
+// on demand and held briefly in memory.
+const amarrCache = new Map(); // typeId -> { row, at }
+
+async function amarrPriceMap(ids) {
+  const cutoff = Date.now() - QUOTE_MAX_AGE_MS;
+  const need = ids.filter((id) => (amarrCache.get(id)?.at ?? 0) < cutoff);
+  const found = new Set();
+  for (const group of chunk(need, 200)) {
+    try {
+      for (const row of await fetchFuzzworkChunk(group, { stationId: AMARR_STATION_ID })) {
+        amarrCache.set(row.typeId, { row, at: Date.now() });
+        found.add(row.typeId);
+      }
+    } catch (err) {
+      console.error(`[restock] Amarr Fuzzwork chunk failed: ${err.message}`);
+    }
+  }
+  // Anything Fuzzwork had nothing for gets a direct ESI look, capped.
+  const missing = need.filter((id) => !found.has(id)).slice(0, 25);
+  const direct = await mapWithConcurrency(missing, 5, (id) =>
+    fetchEsiPrice(id, { regionId: DOMAIN_REGION_ID, stationId: AMARR_STATION_ID }).catch(() => null));
+  for (const row of direct) if (row) amarrCache.set(row.typeId, { row, at: Date.now() });
+
+  const out = new Map();
+  for (const id of ids) {
+    const c = amarrCache.get(id);
+    if (c) out.set(id, { ...c.row, fetchedAt: new Date(c.at) });
+  }
+  return out;
+}
+
+async function getRestockQuotes({ typeIds, hub } = {}) {
   const requested = [...new Set((Array.isArray(typeIds) ? typeIds : []).map(Number).filter(Boolean))].slice(0, 500);
   if (requested.length === 0) return { quotes: {} };
 
@@ -671,6 +705,24 @@ async function getRestockQuotes({ typeIds } = {}) {
   const remap = await marketTypeRemap(requested);
   const canonical = (id) => remap.get(id) ?? id;
   const ids = [...new Set(requested.map(canonical))];
+
+  if (hub === 'amarr') {
+    const [amarr, volumes, averages] = await Promise.all([amarrPriceMap(ids), packagedVolumes(ids), averagePrices()]);
+    const quotes = {};
+    for (const original of requested) {
+      const id = canonical(original);
+      const p = amarr.get(id);
+      quotes[original] = {
+        resolvedTypeId: id !== original ? id : null,
+        jitaBestBuy: p?.bestBuy ?? null,
+        jitaBestSell: p?.bestSell ?? null,
+        jitaFetchedAt: p?.fetchedAt ?? null,
+        averagePrice: averages.get(id) ?? null,
+        volumePerUnit: volumes.get(id) ?? null,
+      };
+    }
+    return { quotes };
+  }
 
   const cutoff = Date.now() - QUOTE_MAX_AGE_MS;
   let prices = await referencePriceMap(ids);
