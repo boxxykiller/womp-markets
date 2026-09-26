@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Boxes,
   Database,
+  Gauge,
   Layers,
   LayoutDashboard,
   PackageX,
@@ -19,7 +20,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { MarketTable } from '@/components/market/MarketTable';
 import { ItemDetailSheet } from '@/components/market/ItemDetailSheet';
 import { LiveMarketFeed } from '@/components/market/LiveMarketFeed';
-import { formatISK, formatQty, formatQtyCompact, formatRelative } from '@/lib/format';
+import { formatISK, formatQty, formatQtyCompact, formatRelative, stockedSummary } from '@/lib/format';
 
 // The dashboard is meant to be left open on a spare screen, so it keeps
 // refreshing when the tab is hidden or the window doesn't have focus.
@@ -65,6 +66,7 @@ export default function Dashboard() {
   }, [lastPolledAt, queryClient]);
 
   const counts = watchlist?.counts ?? { out: 0, critical: 0, low: 0, ok: 0 };
+  const stocked = stockedSummary(counts);
   const needsAttention = (watchlist?.rows ?? []).filter((r) => r.status !== 'ok').slice(0, 10);
   const movers = (velocity?.rows ?? []).slice(0, 8);
 
@@ -113,7 +115,14 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
         <div className="min-w-0">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+          <StatCard
+            title="Stocked"
+            value={stocked.value}
+            subtitle={stocked.subtitle}
+            icon={Gauge}
+            variant={stocked.variant}
+          />
           <StatCard
             title="Needs attention"
             value={counts.out + counts.critical}

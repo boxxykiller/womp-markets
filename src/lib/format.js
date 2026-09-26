@@ -137,3 +137,20 @@ export function deltaClass(fraction) {
   if (Math.abs(fraction) < 0.02) return 'text-slate-400';
   return fraction > 0 ? 'text-amber-400' : 'text-sky-400';
 }
+
+/**
+ * Share of tracked items at or above their minimum, from the watchlist status
+ * counts. Returns null variant/percent-free values when nothing is tracked.
+ */
+export function stockedSummary(counts) {
+  const total = (counts?.out ?? 0) + (counts?.critical ?? 0) + (counts?.low ?? 0) + (counts?.ok ?? 0);
+  if (total === 0) return { value: EM_DASH, subtitle: 'nothing tracked', variant: 'slate' };
+  const pct = (counts.ok / total) * 100;
+  // Floor so 99.6% never reads as a fully stocked 100%.
+  const shown = Math.floor(pct);
+  return {
+    value: `${shown}%`,
+    subtitle: `${counts.ok} of ${total} at or above minimum`,
+    variant: pct >= 90 ? 'emerald' : pct >= 70 ? 'amber' : 'rose',
+  };
+}

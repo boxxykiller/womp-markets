@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, ClipboardPaste, Plus, ShoppingCart, Trash2 } from 'lucide-react';
+import { Boxes, ClipboardPaste, Gauge, Plus, ShoppingCart, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/useAuth';
 import { useCart } from '@/hooks/useCart';
 import { useDebounced } from '@/hooks/useDebounced';
+import { stockedSummary } from '@/lib/format';
 
 const SORT_OPTIONS = [
   { value: 'status', label: 'Status' },
@@ -106,6 +107,8 @@ export default function Tracked() {
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { out: 0, critical: 0, low: 0, ok: 0 };
 
+  const stocked = stockedSummary(counts);
+
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ['watchlist'] });
     queryClient.invalidateQueries({ queryKey: ['watchlist-badge'] });
@@ -171,7 +174,15 @@ export default function Tracked() {
         )}
       </PageHeader>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+        <StatCard
+          title="Stocked"
+          value={stocked.value}
+          subtitle={stocked.subtitle}
+          icon={Gauge}
+          variant={stocked.variant}
+          onClick={() => setStatuses([])}
+        />
         <StatCard
           title="Out of stock"
           value={counts.out}
