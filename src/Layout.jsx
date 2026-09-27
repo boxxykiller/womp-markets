@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Boxes, FileBarChart, LayoutDashboard, LogOut, Menu, Settings, ShoppingCart, X } from 'lucide-react';
+import { BarChart3, Boxes, FileBarChart, LayoutDashboard, LogOut, Menu, Settings, ShoppingCart, Swords, X } from 'lucide-react';
 import { api } from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useCart } from '@/hooks/useCart';
@@ -9,11 +9,12 @@ import { cn } from '@/lib/utils';
 import icon from '@/assets/womp-logo.png';
 import heroBg from '@/assets/womp-bg-hero.svg';
 
-// A flat top nav rather than a sidebar: there are six destinations, and the
+// A flat top nav rather than a sidebar: there are seven destinations, and the
 // tables on every page want the full window width.
 const NAV = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Tracked', path: '/tracked', icon: Boxes },
+  { name: 'Doctrines', path: '/doctrines', icon: Swords },
   { name: 'Browse', path: '/browse', icon: BarChart3 },
   { name: 'Reports', path: '/reports', icon: FileBarChart },
   { name: 'Restock', path: '/restock', icon: ShoppingCart },
@@ -59,7 +60,18 @@ export default function Layout({ children }) {
   });
   const attention = watchlist ? (watchlist.counts?.out ?? 0) + (watchlist.counts?.critical ?? 0) : 0;
 
-  const badgeFor = (item) => (item.name === 'Tracked' ? attention : item.name === 'Restock' ? cartCount : 0);
+  // Doctrines that can't field even their minimum, for the same reason.
+  const { data: doctrineData } = useQuery({
+    queryKey: ['doctrines'],
+    queryFn: () => api.invoke('getDoctrines', {}),
+    enabled: isAuthenticated,
+    staleTime: 2 * 60_000,
+    refetchInterval: 2 * 60_000,
+  });
+  const doctrinesDown = doctrineData ? (doctrineData.counts?.out ?? 0) + (doctrineData.counts?.critical ?? 0) : 0;
+
+  const BADGES = { Tracked: attention, Doctrines: doctrinesDown, Restock: cartCount };
+  const badgeFor = (item) => BADGES[item.name] ?? 0;
   const isActive = (path) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path));
 
   async function handleLogout() {

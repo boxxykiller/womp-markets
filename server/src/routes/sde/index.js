@@ -11,20 +11,9 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { getSdeStatus, isIngestInProgress } from '../../lib/sdeIngest.js';
 import { getLastCheck, runSdeCheck } from '../../lib/sdeScheduler.js';
 import { requireAdmin } from '../../middleware/requireAdmin.js';
+import { flattenType as flatten, resolveTypesByName } from '../../lib/sdeNames.js';
 
 const router = express.Router();
-
-function flatten(row) {
-  return {
-    key: row.key,
-    typeId: Number(row.key),
-    name: row.data?.name?.en ?? null,
-    groupId: row.data?.groupID ?? null,
-    marketGroupId: row.data?.marketGroupID ?? null,
-    volume: row.data?.volume ?? null,
-    published: row.data?.published ?? null,
-  };
-}
 
 router.get(
   '/status',
@@ -79,24 +68,7 @@ router.post(
     if (names.length === 0) return res.json({ data: { matched: [], unmatched: [] } });
     if (names.length > 1000) throw new HttpError(400, 'Too many names in one request (max 1000).');
 
-    const lowered = names.map((n) => String(n).trim().toLowerCase()).filter(Boolean);
-    const rows = await prisma.$queryRaw`
-      SELECT "key", "data" FROM "SdeRecord"
-      WHERE "dataset" = 'types'
-        AND lower("data"->'name'->>'en') = ANY(${lowered}::text[])
-    `;
-
-    // Names aren't unique in the SDE: unpublished test hulls and non-market
-    // duplicates share them with the real item. Prefer the published market
-    // type, or the paste tracks a copy that has no market and never prices.
-    const rank = (t) => (t.published ? 2 : 0) + (t.marketGroupId != null ? 1 : 0);
-    const byLowerName = new Map();
-    for (const r of rows) {
-      const t = flatten(r);
-      const key = String(t.name ?? '').toLowerCase();
-      const current = byLowerName.get(key);
-      if (!current || rank(t) > rank(current)) byLowerName.set(key, t);
-    }
+    const byLowerName = await resolveTypesByName(names);
     const matched = [];
     const unmatched = [];
     for (const name of names) {

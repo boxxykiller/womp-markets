@@ -808,4 +808,4 @@ export const marketHandlers = {
   pollMarketNow: { fn: pollMarketNow, auth: 'admin' },
 };
 
-export { aggregateBook, buildRow, filterTypeIds, resolveItemNames, getDistinctListedTypeIds, dailyLookupFor };
+export { aggregateBook, buildRow, filterTypeIds, resolveItemNames, getDistinctListedTypeIds, dailyLookupFor, referencePriceMap };

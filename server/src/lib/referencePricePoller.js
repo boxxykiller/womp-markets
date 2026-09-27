@@ -137,11 +137,15 @@ export async function fetchEsiPrice(typeId, { regionId = THE_FORGE_REGION_ID, st
 // The types worth pricing: everything tracked, plus everything currently
 // listed in the citadel (so Browse has a Jita column too).
 export async function collectTypeIds() {
-  const [watched, listed] = await Promise.all([
+  const [watched, listed, fits] = await Promise.all([
     prisma.marketWatchItem.findMany({ select: { typeId: true } }),
     prisma.marketOrder.findMany({ select: { typeId: true }, distinct: ['typeId'] }),
+    // Doctrine parts are priced even when nothing local lists them — that's
+    // exactly when the "cost to fill" on the Doctrines page is needed.
+    prisma.doctrineFit.findMany({ select: { items: true } }),
   ]);
-  return [...new Set([...watched.map((w) => w.typeId), ...listed.map((l) => l.typeId)])];
+  const fitted = fits.flatMap((f) => (Array.isArray(f.items) ? f.items.map((i) => Number(i.typeId)) : []));
+  return [...new Set([...watched.map((w) => w.typeId), ...listed.map((l) => l.typeId), ...fitted.filter(Boolean)])];
 }
 
 async function persist(rows) {

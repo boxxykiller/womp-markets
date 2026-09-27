@@ -8,6 +8,7 @@ import { CartProvider } from '@/hooks/useCart';
 import Layout from '@/Layout';
 import Dashboard from '@/pages/Dashboard';
 import Tracked from '@/pages/Tracked';
+import Doctrines from '@/pages/Doctrines';
 import Browse from '@/pages/Browse';
 import Reports from '@/pages/Reports';
 import Restock from '@/pages/Restock';
@@ -48,6 +49,7 @@ function AppRoutes() {
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/tracked" element={<Tracked />} />
+                <Route path="/doctrines" element={<Doctrines />} />
                 <Route path="/browse" element={<Browse />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/restock" element={<Restock />} />

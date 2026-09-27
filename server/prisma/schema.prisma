@@ -304,6 +304,58 @@ model MarketSnapshot {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Doctrines
+// ─────────────────────────────────────────────────────────────────────────
+
+// A fleet doctrine: a folder of fits. Global like the watchlist — everyone
+// sees the same doctrines and the same minimums. Readiness (how many of each
+// fit the market can supply right now) is computed at read time from the live
+// book, never stored.
+model Doctrine {
+  id           String   @id @default(uuid())
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+  created_by   String?
+
+  name        String
+  description String?
+  // Default number of each fit to keep on market. A fit's own minimum, when
+  // set, overrides it.
+  minQuantity Int     @default(0)
+  sortOrder   Int     @default(0)
+}
+
+// One ship fit inside a doctrine, imported from EFT text. `items` is the
+// resolved fit — [{ typeId, name, quantity, kind }] with kind one of
+// hull | module | drone | cargo — kept as JSON because a fit is read and
+// replaced whole, never queried by part. `eft` keeps the pasted text so the
+// fit can be copied back into the game exactly as it was given.
+model DoctrineFit {
+  id           String   @id @default(uuid())
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+  created_by   String?
+
+  doctrineId   String
+  name         String
+  shipTypeId   Int
+  shipName     String?
+  role         String   @default("main") // main | logi | support
+  // Null inherits the doctrine's minimum.
+  minQuantity  Int?
+  // Whether cargo (ammo, paste, spare charges) counts toward "fittable".
+  includeCargo Boolean  @default(true)
+  eft          String
+  items        Json
+  // Lines that didn't resolve to a market item, shown so a typo isn't
+  // silently read as "fully stocked".
+  unmatched    Json?
+  sortOrder    Int      @default(0)
+
+  @@index([doctrineId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Jita 4-4 reference prices
 // ─────────────────────────────────────────────────────────────────────────
 

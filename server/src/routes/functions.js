@@ -14,6 +14,7 @@ import { authHandlers } from './auth/handlers.js';
 import { marketHandlers } from './market/index.js';
 import { reportHandlers } from './market/reports.js';
 import { settingsHandlers } from './settings/index.js';
+import { doctrineHandlers } from './doctrines/index.js';
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ const REGISTRY = {
   ...marketHandlers,
   ...reportHandlers,
   ...settingsHandlers,
+  ...doctrineHandlers,
 };
 
 router.post(
