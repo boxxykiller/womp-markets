@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle, ChevronDown, ClipboardPaste, FolderOpen, Gauge, Loader2, Pencil, Plus, Search, ShoppingCart, Swords, Trash2, X,
+  AlertTriangle, ChevronDown, ClipboardPaste, Construction, FolderOpen, Gauge, Loader2, Pencil, Plus, Search, ShoppingCart, Swords, Trash2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
@@ -268,6 +268,16 @@ export default function Doctrines() {
 
   return (
     <Page>
+      <div className="flex items-start gap-3 mb-6 p-4 rounded-xl border border-amber-500/40 bg-amber-500/10">
+        <Construction className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <div className="text-sm font-semibold text-amber-300">Under construction</div>
+          <p className="text-xs text-amber-200/80 mt-0.5">
+            This page is still being built — numbers and features may change, and some things may not work yet.
+          </p>
+        </div>
+      </div>
+
       <PageHeader
         icon={Swords}
         accent="violet"
