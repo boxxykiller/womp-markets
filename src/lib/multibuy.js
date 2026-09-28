@@ -40,7 +40,10 @@ const STOCK_LINE = /^(.*?)[\t ]+\d[\d,.]*\s*\/\s*(\d[\d,.]*|[—–-])?\s*(?:[\d
 export function parseMultibuy(text) {
   const lines = String(text || '')
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    // Clipboard text from the client and from browsers can carry non-breaking
+    // spaces and zero-width characters, which break both splitting and the
+    // exact name match on the server.
+    .map((line) => line.replace(/[   ]/g, ' ').replace(/[​-‍⁠﻿]/g, '').trim())
     .filter(Boolean);
 
   const items = [];
@@ -55,17 +58,39 @@ export function parseMultibuy(text) {
       continue;
     }
 
-    // Split on the LAST tab or 2+ spaces, so item names containing spaces
-    // (almost all of them) survive intact.
-    const match = line.match(/^(.*?)[\t ]{1,}([\d.,\s]+)$/);
+    // Column layout — tabs or 2+ spaces — as in EVE's multibuy "copy" output:
+    // "Name<TAB>Qty<TAB>Unit price<TAB>Total", closed by a "Total:" line. The
+    // second column is the quantity; the price columns are ignored.
+    const columns = line.split(/\t| {2,}/).map((c) => c.trim()).filter(Boolean);
+    if (columns.length >= 2) {
+      const [name, qty] = columns;
+      if (TOTAL_LINE.test(name)) continue;
+      if (/^\d[\d,.]*$/.test(qty)) {
+        items.push({ name, quantity: toQuantity(qty) });
+        continue;
+      }
+    }
+    if (columns.length === 1 && TOTAL_LINE.test(columns[0])) continue;
+
+    // Single-space "Name 100": the quantity is the trailing number, so item
+    // names containing spaces (almost all of them) survive intact.
+    const match = line.match(/^(.*?)\s+(\d[\d.,]*)$/);
     if (!match) {
       items.push({ name: line, quantity: 0 });
       continue;
     }
     const name = match[1].trim();
-    const quantity = Number(match[2].replace(/[\s,.]/g, ''));
     if (!name) continue;
-    items.push({ name, quantity: Number.isFinite(quantity) ? quantity : 0 });
+    items.push({ name, quantity: toQuantity(match[2]) });
   }
   return items;
+}
+
+// The footer of EVE's multibuy copy output ("Total:" plus the ISK sum).
+const TOTAL_LINE = /^total:?$/i;
+
+// Quantities are whole units, so both "," and "." are thousands separators.
+function toQuantity(raw) {
+  const n = Number(String(raw).replace(/[\s,.]/g, ''));
+  return Number.isFinite(n) ? n : 0;
 }

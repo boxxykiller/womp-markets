@@ -96,6 +96,32 @@ describe('parseMultibuy', () => {
   });
 });
 
+describe("parseMultibuy — EVE's multibuy copy output", () => {
+  const copied = [
+    'Sleipnir\t1\t329,000,000.00\t329,000,000.00',
+    'Caldari Shuttle\t1\t100,000.00\t100,000.00',
+    'Total:\t\t\t329,100,000.00',
+  ].join('\n');
+
+  it('takes the quantity column, ignores prices, and drops the Total line', () => {
+    expect(parseMultibuy(copied)).toEqual([
+      { name: 'Sleipnir', quantity: 1 },
+      { name: 'Caldari Shuttle', quantity: 1 },
+    ]);
+  });
+
+  it('copes with tabs turned into runs of spaces', () => {
+    expect(parseMultibuy(copied.replace(/\t/g, '   '))).toEqual([
+      { name: 'Sleipnir', quantity: 1 },
+      { name: 'Caldari Shuttle', quantity: 1 },
+    ]);
+  });
+
+  it('strips non-breaking and zero-width characters from names', () => {
+    expect(parseMultibuy('﻿Sleipnir \t2\t1.00\t2.00')).toEqual([{ name: 'Sleipnir', quantity: 2 }]);
+  });
+});
+
 describe('parseMultibuy — stock export lines', () => {
   it('takes the target after the slash and ignores stock and ISK price', () => {
     expect(parseMultibuy('Aurora M\t725 / 500\t179900.00 ISK')).toEqual([{ name: 'Aurora M', quantity: 500 }]);
