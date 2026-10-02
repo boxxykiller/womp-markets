@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Check, ChevronDown, ClipboardPaste, Copy, Loader2, Package, RotateCcw, Search, Tags, Trash2,
@@ -9,7 +9,9 @@ import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { useCart } from '@/hooks/useCart';
+import { useSort } from '@/hooks/useSort';
 import { formatISK, formatISKFull, formatQty } from '@/lib/format';
 import { formatMultibuy, parseMultibuy } from '@/lib/multibuy';
 import { cn } from '@/lib/utils';
@@ -369,6 +371,19 @@ export default function Restock() {
     );
   }, [rows, filter, hideZero]);
 
+  // Sorts on what each cell shows: line totals or per-unit figures, and per
+  // unit for a quantity-0 line either way.
+  const restockValue = useCallback(
+    ({ item, c }, key) => {
+      if (key === 'name') return item.itemName;
+      if (key === 'qty') return c.qty;
+      if (key === 'm3') return perUnit ? item.volumePerUnit : item.volumePerUnit == null ? null : c.m3;
+      return (c.qty === 0 || perUnit ? c.unit : c.line)[key];
+    },
+    [perUnit],
+  );
+  const sort = useSort(visibleRows, restockValue);
+
   function removeZeroQty() {
     for (const { item, c } of rows) if (c.qty === 0) removeItem(item.typeId);
     toast.success(`Removed ${zeroCount} item${zeroCount === 1 ? '' : 's'} with quantity 0`);
@@ -687,19 +702,35 @@ export default function Restock() {
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10 bg-[#0D1829]">
               <tr className="text-xs text-slate-400 border-b border-slate-800">
-                <th className="text-left font-medium px-4 h-10 min-w-[220px]">Item</th>
-                <th className="text-right font-medium px-2 w-28">Qty</th>
-                <th className="text-right font-medium px-2">m³</th>
-                <th className="text-right font-medium px-2">Gross Buy</th>
-                <th className="text-right font-medium px-2">Gross Sell</th>
-                <th className="text-right font-medium px-2">Net Buy</th>
-                <th className="text-right font-medium px-2">Net Sell</th>
-                <th className="text-right font-medium px-2">Profit</th>
+                <th className="text-left font-medium px-4 h-10 min-w-[220px]">
+                  <SortLabel sort={sort} sortKey="name">Item</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2 w-28">
+                  <SortLabel sort={sort} sortKey="qty" first="desc" align="right">Qty</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2">
+                  <SortLabel sort={sort} sortKey="m3" first="desc" align="right">m³</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2">
+                  <SortLabel sort={sort} sortKey="grossBuy" first="desc" align="right">Gross Buy</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2">
+                  <SortLabel sort={sort} sortKey="grossSell" first="desc" align="right">Gross Sell</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2">
+                  <SortLabel sort={sort} sortKey="netBuy" first="desc" align="right">Net Buy</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2">
+                  <SortLabel sort={sort} sortKey="netSell" first="desc" align="right">Net Sell</SortLabel>
+                </th>
+                <th className="text-right font-medium px-2">
+                  <SortLabel sort={sort} sortKey="profit" first="desc" align="right">Profit</SortLabel>
+                </th>
                 <th className="w-10" />
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(({ item, est, c }) => {
+              {sort.rows.map(({ item, est, c }) => {
                 // A zero line total says nothing; show what one unit costs
                 // instead, dimmed, so a quantity can be chosen from it.
                 const zero = c.qty === 0;

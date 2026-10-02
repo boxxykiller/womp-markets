@@ -2,10 +2,14 @@ import { ClipboardCopy, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { useCart } from '@/hooks/useCart';
+import { useSort } from '@/hooks/useSort';
 import { formatISK, formatISKFull, formatQty } from '@/lib/format';
 import { formatMultibuy } from '@/lib/multibuy';
 import { toCartItems } from './shared';
+
+const missingValue = (m, key) => (key === 'cost' ? (m.jitaPrice != null ? m.jitaPrice * m.missing : null) : m[key]);
 
 /**
  * The shopping list for a doctrine (or every doctrine at once): each part
@@ -13,6 +17,7 @@ import { toCartItems } from './shared';
  */
 export function MissingSheet({ open, onOpenChange, title, subtitle, missing = [], totalCost }) {
   const { addItems } = useCart();
+  const sort = useSort(missing, missingValue);
 
   function addToCart() {
     addItems(toCartItems(missing));
@@ -61,19 +66,37 @@ export function MissingSheet({ open, onOpenChange, title, subtitle, missing = []
                 </Button>
               </div>
 
-              <div className="rounded-lg border border-slate-800 overflow-hidden">
+              <div className="rounded-lg border border-slate-800 overflow-x-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-900/60 text-[11px] uppercase tracking-wide text-[#4A7BA7] whitespace-nowrap">
                     <tr>
-                      <th className="text-left font-medium px-3 py-2">Item</th>
-                      <th className="text-right font-medium px-3 py-2">Needed</th>
-                      <th className="text-right font-medium px-3 py-2">On market</th>
-                      <th className="text-right font-medium px-3 py-2">Missing</th>
-                      <th className="text-right font-medium px-3 py-2 hidden sm:table-cell">Jita cost</th>
+                      <th className="text-left font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="name">Item</SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="needed" first="desc" align="right">
+                          Needed
+                        </SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="onMarket" first="desc" align="right">
+                          On market
+                        </SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="missing" first="desc" align="right">
+                          Missing
+                        </SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2 hidden sm:table-cell">
+                        <SortLabel sort={sort} sortKey="cost" first="desc" align="right">
+                          Jita cost
+                        </SortLabel>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {missing.map((m) => (
+                    {sort.rows.map((m) => (
                       <tr key={m.typeId}>
                         <td className="px-3 py-1.5">
                           <div className="flex items-center gap-2 min-w-0">

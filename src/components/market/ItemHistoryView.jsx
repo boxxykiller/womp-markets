@@ -17,7 +17,9 @@ import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { useDebounced } from '@/hooks/useDebounced';
+import { useSort } from '@/hooks/useSort';
 import { cn } from '@/lib/utils';
 import {
   VERDICT_META,
@@ -48,6 +50,9 @@ function Stat({ label, value, sub, className }) {
     </div>
   );
 }
+
+// Daily-table columns sort on the row field of the same name.
+const dayValue = (row, key) => row[key];
 
 function formatDay(value) {
   if (!value) return '—';
@@ -143,6 +148,8 @@ export function ItemHistoryView({ params, picked, onPick, controls }) {
   const s = data?.summary;
   const item = data?.item;
   const rows = data?.rows ?? [];
+  // Newest day first until a column is picked.
+  const daySort = useSort(rows, dayValue, { key: 'date', dir: 'desc' });
   const jitaRows = data?.jitaRows ?? [];
   const ma = s?.maDays ?? params.maDays;
 
@@ -311,21 +318,35 @@ export function ItemHistoryView({ params, picked, onPick, controls }) {
 
               <section>
                 <h3 className="text-sm font-semibold text-white mb-2">Daily history</h3>
-                <div className="border border-slate-800 rounded-lg overflow-x-auto max-h-80 overflow-y-auto scrollbar-thin">
-                  <Table>
-                    <TableHeader>
+                <div className="border border-slate-800 rounded-lg overflow-auto max-h-80 scrollbar-thin">
+                  <Table className="whitespace-nowrap">
+                    <TableHeader className="sticky top-0 z-10 bg-[#0D1829]">
                       <TableRow className="border-slate-800 hover:bg-transparent">
-                        <TableHead className="text-slate-400">Date</TableHead>
-                        <TableHead className="text-slate-400 text-right">Sold</TableHead>
-                        <TableHead className="text-slate-400 text-right">{ma}d avg</TableHead>
-                        <TableHead className="text-slate-400 text-right">Low sell</TableHead>
-                        <TableHead className="text-slate-400 text-right">Sell {ma}d avg</TableHead>
-                        <TableHead className="text-slate-400 text-right">High buy</TableHead>
-                        <TableHead className="text-slate-400 text-right">On market</TableHead>
+                        <TableHead className="text-slate-400">
+                          <SortLabel sort={daySort} sortKey="date" first="desc">Date</SortLabel>
+                        </TableHead>
+                        <TableHead className="text-slate-400 text-right">
+                          <SortLabel sort={daySort} sortKey="units" first="desc" align="right">Sold</SortLabel>
+                        </TableHead>
+                        <TableHead className="text-slate-400 text-right">
+                          <SortLabel sort={daySort} sortKey="unitsMA" first="desc" align="right">{ma}d avg</SortLabel>
+                        </TableHead>
+                        <TableHead className="text-slate-400 text-right">
+                          <SortLabel sort={daySort} sortKey="lowSell" first="desc" align="right">Low sell</SortLabel>
+                        </TableHead>
+                        <TableHead className="text-slate-400 text-right">
+                          <SortLabel sort={daySort} sortKey="lowSellMA" first="desc" align="right">Sell {ma}d avg</SortLabel>
+                        </TableHead>
+                        <TableHead className="text-slate-400 text-right">
+                          <SortLabel sort={daySort} sortKey="highBuy" first="desc" align="right">High buy</SortLabel>
+                        </TableHead>
+                        <TableHead className="text-slate-400 text-right">
+                          <SortLabel sort={daySort} sortKey="sellVolume" first="desc" align="right">On market</SortLabel>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {[...rows].reverse().map((r) => (
+                      {daySort.rows.map((r) => (
                         <TableRow key={r.date} className="border-slate-800">
                           <TableCell className="text-slate-300 tnum">{r.date}</TableCell>
                           <TableCell className="text-slate-300 tnum text-right">{formatQty(r.units)}</TableCell>

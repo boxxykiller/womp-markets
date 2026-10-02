@@ -4,11 +4,14 @@ import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { StatusBadge } from '@/components/market/MarketTable';
 import { useCart } from '@/hooks/useCart';
+import { useSortState } from '@/hooks/useSort';
 import { cn } from '@/lib/utils';
 import { formatISK, formatISKFull, formatQty } from '@/lib/format';
 import { formatMultibuy } from '@/lib/multibuy';
+import { sortRows } from '@/lib/sort';
 import { KIND_LABELS, ROLES, ROLE_META, RoleBadge, toCartItems } from './shared';
 
 function Stat({ label, value, className, title }) {
@@ -35,6 +38,8 @@ async function copy(text, what) {
  */
 export function FitDetailSheet({ fit, doctrine, open, onOpenChange, isAdmin, onChanged, onReplace }) {
   const { addItems } = useCart();
+  // One ordering shared by every slot group, so sorting one sorts them all.
+  const sort = useSortState();
 
   const update = useMutation({
     mutationFn: (patch) => api.invoke('updateDoctrineFit', { id: fit.id, ...patch }),
@@ -56,7 +61,7 @@ export function FitDetailSheet({ fit, doctrine, open, onOpenChange, isAdmin, onC
 
   const missing = fit.items.filter((i) => i.missing > 0);
   const groups = Object.keys(KIND_LABELS)
-    .map((kind) => ({ kind, items: fit.items.filter((i) => i.kind === kind) }))
+    .map((kind) => ({ kind, items: sortRows(fit.items.filter((i) => i.kind === kind), (i, k) => i[k], sort.key, sort.dir) }))
     .filter((g) => g.items.length > 0);
   const inherited = fit.minQuantity == null;
 
@@ -208,17 +213,37 @@ export function FitDetailSheet({ fit, doctrine, open, onOpenChange, isAdmin, onC
           {groups.map((group) => (
             <section key={group.kind}>
               <h3 className="text-sm font-semibold text-white mb-2">{KIND_LABELS[group.kind]}</h3>
-              <div className="rounded-lg border border-slate-800 overflow-hidden">
+              <div className="rounded-lg border border-slate-800 overflow-x-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-900/60 text-[11px] uppercase tracking-wide text-[#4A7BA7] whitespace-nowrap">
                     <tr>
-                      <th className="text-left font-medium px-3 py-2">Item</th>
-                      <th className="text-right font-medium px-3 py-2">Per fit</th>
-                      <th className="text-right font-medium px-3 py-2">Needed</th>
-                      <th className="text-right font-medium px-3 py-2">On market</th>
-                      <th className="text-right font-medium px-3 py-2">Missing</th>
+                      <th className="text-left font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="name">Item</SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="perFit" first="desc" align="right">
+                          Per fit
+                        </SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="needed" first="desc" align="right">
+                          Needed
+                        </SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="onMarket" first="desc" align="right">
+                          On market
+                        </SortLabel>
+                      </th>
+                      <th className="text-right font-medium px-3 py-2">
+                        <SortLabel sort={sort} sortKey="missing" first="desc" align="right">
+                          Missing
+                        </SortLabel>
+                      </th>
                       <th className="text-right font-medium px-3 py-2 hidden sm:table-cell" title="Whole fits this item's stock covers">
-                        Fits
+                        <SortLabel sort={sort} sortKey="supports" first="asc" align="right">
+                          Fits
+                        </SortLabel>
                       </th>
                     </tr>
                   </thead>

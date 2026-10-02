@@ -9,10 +9,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { StatusBadge } from './MarketTable';
 import { ItemHistoryView, VerdictBadge } from './ItemHistoryView';
 import { useCart } from '@/hooks/useCart';
 import { useDebounced } from '@/hooks/useDebounced';
+import { useSort } from '@/hooks/useSort';
 import { cn } from '@/lib/utils';
 import {
   deltaClass,
@@ -30,109 +32,121 @@ const GRID = '#1E2D45';
 const AXIS = { fontSize: 10, fill: '#64748b' };
 const TOOLTIP_STYLE = { background: '#0D1829', border: '1px solid #1E2D45', borderRadius: 8, fontSize: 12 };
 
+const STATUS_ORDER = ['out', 'critical', 'low', 'ok'];
+const lineCost = (r) => (r.restockQuantity ?? 0) * (r.jitaBestSell ?? r.bestSell ?? 0);
+
 // Every column a report can ask for, defined once. A report names the subset
-// it wants rather than each one hand-rolling a table.
+// it wants rather than each one hand-rolling a table. `value` is the raw
+// number behind the cell — what CSV exports and what the column sorts on
+// (unless `sortValue` says otherwise) — and `first` is the direction a click
+// sorts it in first: biggest first for amounts, soonest first for time left.
 const COLUMNS = {
-  status: { label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
-  min: { label: 'Min', align: 'right', render: (r) => formatQty(r.effectiveMin) },
-  volume: { label: 'On market', align: 'right', render: (r) => formatQty(r.sellVolume) },
-  buyVolume: { label: 'Buy depth', align: 'right', render: (r) => formatQty(r.buyVolume) },
+  status: {
+    label: 'Status',
+    value: (r) => r.status,
+    sortValue: (r) => (r.status == null ? null : STATUS_ORDER.indexOf(r.status)),
+    render: (r) => <StatusBadge status={r.status} />,
+  },
+  min: { label: 'Min', align: 'right', value: (r) => r.effectiveMin, render: (r) => formatQty(r.effectiveMin) },
+  volume: { label: 'On market', align: 'right', value: (r) => r.sellVolume, render: (r) => formatQty(r.sellVolume) },
+  buyVolume: { label: 'Buy depth', align: 'right', value: (r) => r.buyVolume, render: (r) => formatQty(r.buyVolume) },
   restock: {
     label: 'Restock',
     align: 'right',
+    value: (r) => r.restockQuantity,
     render: (r) => <span className="text-amber-400 font-medium">{formatQty(r.restockQuantity)}</span>,
   },
-  rate: { label: 'Sold/day', align: 'right', render: (r) => formatRate(r.avgDaily30) },
-  cover: { label: 'Days left', align: 'right', render: (r) => formatDays(r.daysOfCover30) },
-  stockoutAt: { label: 'Runs out', align: 'right', render: (r) => formatRelative(r.stockoutAt) },
-  localBuy: { label: 'Local buy', align: 'right', render: (r) => formatISK(r.bestBuy) },
-  localSell: { label: 'Local sell', align: 'right', render: (r) => formatISK(r.bestSell) },
-  jitaSell: { label: 'Jita sell', align: 'right', render: (r) => formatISK(r.jitaBestSell) },
+  rate: { label: 'Sold/day', align: 'right', value: (r) => r.avgDaily30, render: (r) => formatRate(r.avgDaily30) },
+  cover: {
+    label: 'Days left',
+    align: 'right',
+    first: 'asc',
+    value: (r) => r.daysOfCover30,
+    render: (r) => formatDays(r.daysOfCover30),
+  },
+  stockoutAt: {
+    label: 'Runs out',
+    align: 'right',
+    first: 'asc',
+    value: (r) => r.stockoutAt,
+    sortValue: (r) => (r.stockoutAt ? new Date(r.stockoutAt).getTime() : null),
+    render: (r) => formatRelative(r.stockoutAt),
+  },
+  localBuy: { label: 'Local buy', align: 'right', value: (r) => r.bestBuy, render: (r) => formatISK(r.bestBuy) },
+  localSell: { label: 'Local sell', align: 'right', value: (r) => r.bestSell, render: (r) => formatISK(r.bestSell) },
+  jitaSell: { label: 'Jita sell', align: 'right', value: (r) => r.jitaBestSell, render: (r) => formatISK(r.jitaBestSell) },
   spread: {
     label: 'vs Jita',
     align: 'right',
+    value: (r) => r.vsJitaSellPct,
     render: (r) => <span className={deltaClass(r.vsJitaSellPct)}>{formatPct(r.vsJitaSellPct, { signed: true })}</span>,
   },
-  split: { label: 'Buy share', align: 'right', render: (r) => formatPct(r.buySellSplit) },
-  lineCost: {
-    label: 'Est. cost',
-    align: 'right',
-    render: (r) => formatISK((r.restockQuantity ?? 0) * (r.jitaBestSell ?? r.bestSell ?? 0)),
-  },
-  iskTiedUp: { label: 'ISK tied up', align: 'right', render: (r) => formatISK(r.iskTiedUp) },
-  unitsConfirmed: { label: 'Observed', align: 'right', render: (r) => formatQty(r.unitsConfirmed) },
-  unitsEstimated: { label: 'Inferred', align: 'right', render: (r) => formatQty(r.unitsEstimated) },
-  units: { label: 'Units', align: 'right', render: (r) => formatQty(r.units) },
+  split: { label: 'Buy share', align: 'right', value: (r) => r.buySellSplit, render: (r) => formatPct(r.buySellSplit) },
+  lineCost: { label: 'Est. cost', align: 'right', value: lineCost, render: (r) => formatISK(lineCost(r)) },
+  iskTiedUp: { label: 'ISK tied up', align: 'right', value: (r) => r.iskTiedUp, render: (r) => formatISK(r.iskTiedUp) },
+  unitsConfirmed: { label: 'Observed', align: 'right', value: (r) => r.unitsConfirmed, render: (r) => formatQty(r.unitsConfirmed) },
+  unitsEstimated: { label: 'Inferred', align: 'right', value: (r) => r.unitsEstimated, render: (r) => formatQty(r.unitsEstimated) },
+  units: { label: 'Units', align: 'right', value: (r) => r.units, render: (r) => formatQty(r.units) },
   sold: {
     label: 'Sold',
     align: 'right',
+    value: (r) => r.units,
     render: (r) => <span className="text-amber-400 font-medium">{formatQty(r.units)}</span>,
   },
-  isk: { label: 'ISK', align: 'right', render: (r) => formatISK(r.isk) },
-  perDay: { label: 'Per day', align: 'right', render: (r) => formatRate(r.unitsPerDay) },
-  iskPerDay: { label: 'Est. ISK/day', align: 'right', render: (r) => formatISK(r.iskPerDay) },
+  isk: { label: 'ISK', align: 'right', value: (r) => r.isk, render: (r) => formatISK(r.isk) },
+  perDay: { label: 'Per day', align: 'right', value: (r) => r.unitsPerDay, render: (r) => formatRate(r.unitsPerDay) },
+  iskPerDay: { label: 'Est. ISK/day', align: 'right', value: (r) => r.iskPerDay, render: (r) => formatISK(r.iskPerDay) },
   // History columns — the moving-average window is whatever the report asked for.
-  verdict: { label: 'Verdict', render: (r) => <VerdictBadge verdict={r.verdict} /> },
-  maRate: { label: 'Sold/day (MA)', align: 'right', render: (r) => formatRate(r.maPerDay) },
-  periodRate: { label: 'Sold/day (period)', align: 'right', render: (r) => formatRate(r.periodPerDay) },
+  verdict: { label: 'Verdict', value: (r) => r.verdict, render: (r) => <VerdictBadge verdict={r.verdict} /> },
+  maRate: { label: 'Sold/day (MA)', align: 'right', value: (r) => r.maPerDay, render: (r) => formatRate(r.maPerDay) },
+  periodRate: { label: 'Sold/day (period)', align: 'right', value: (r) => r.periodPerDay, render: (r) => formatRate(r.periodPerDay) },
   volumeTrend: {
     label: 'Vol trend',
     align: 'right',
+    value: (r) => r.volumeTrendPct,
     render: (r) => <span className={deltaClass(r.volumeTrendPct)}>{formatPct(r.volumeTrendPct, { signed: true })}</span>,
   },
-  maPrice: { label: 'Sell (MA)', align: 'right', render: (r) => formatISK(r.maPrice) },
+  maPrice: { label: 'Sell (MA)', align: 'right', value: (r) => r.maPrice, render: (r) => formatISK(r.maPrice) },
   priceTrend: {
     label: 'Price trend',
     align: 'right',
+    value: (r) => r.priceTrendPct,
     render: (r) => <span className={deltaClass(r.priceTrendPct)}>{formatPct(r.priceTrendPct, { signed: true })}</span>,
   },
   lastSale: {
     label: 'Last sale',
     align: 'right',
+    first: 'asc',
+    value: (r) => r.daysSinceSale,
     render: (r) => (r.daysSinceSale == null ? 'Never' : r.daysSinceSale === 0 ? 'Today' : `${r.daysSinceSale}d ago`),
   },
-  historyCover: { label: 'Days left', align: 'right', render: (r) => formatDays(r.historyCover) },
-  outOfStock: { label: 'Days sold out', align: 'right', render: (r) => formatQty(r.daysOutOfStock) },
-  jitaRate: { label: 'Jita sold/day (MA)', align: 'right', render: (r) => formatRate(r.jitaMaPerDay) },
+  historyCover: {
+    label: 'Days left',
+    align: 'right',
+    first: 'asc',
+    value: (r) => r.historyCover,
+    render: (r) => formatDays(r.historyCover),
+  },
+  outOfStock: { label: 'Days sold out', align: 'right', value: (r) => r.daysOutOfStock, render: (r) => formatQty(r.daysOutOfStock) },
+  jitaRate: { label: 'Jita sold/day (MA)', align: 'right', value: (r) => r.jitaMaPerDay, render: (r) => formatRate(r.jitaMaPerDay) },
 };
+
+function sortValue(row, key) {
+  if (key === 'name') return row.itemName;
+  const col = COLUMNS[key];
+  if (!col) return null;
+  return (col.sortValue ?? col.value)(row);
+}
 
 function toCsv(rows, columnKeys) {
   const header = ['Item', ...columnKeys.map((k) => COLUMNS[k].label)];
   const escape = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 
-  const lines = rows.map((r) => {
-    // Raw values, not the display strings: a spreadsheet wants 1234567, not
-    // "1.23M".
-    const cells = columnKeys.map((k) => {
-      switch (k) {
-        case 'status': return r.status ?? '';
-        case 'min': return r.effectiveMin ?? '';
-        case 'volume': return r.sellVolume ?? '';
-        case 'buyVolume': return r.buyVolume ?? '';
-        case 'restock': return r.restockQuantity ?? '';
-        case 'rate': return r.avgDaily30 ?? '';
-        case 'cover': return r.daysOfCover30 ?? '';
-        case 'stockoutAt': return r.stockoutAt ?? '';
-        case 'localBuy': return r.bestBuy ?? '';
-        case 'localSell': return r.bestSell ?? '';
-        case 'jitaSell': return r.jitaBestSell ?? '';
-        case 'spread': return r.vsJitaSellPct ?? '';
-        case 'split': return r.buySellSplit ?? '';
-        case 'lineCost': return (r.restockQuantity ?? 0) * (r.jitaBestSell ?? r.bestSell ?? 0);
-        case 'iskTiedUp': return r.iskTiedUp ?? '';
-        case 'maRate': return r.maPerDay ?? '';
-        case 'periodRate': return r.periodPerDay ?? '';
-        case 'volumeTrend': return r.volumeTrendPct ?? '';
-        case 'priceTrend': return r.priceTrendPct ?? '';
-        case 'lastSale': return r.daysSinceSale ?? '';
-        case 'outOfStock': return r.daysOutOfStock ?? '';
-        case 'jitaRate': return r.jitaMaPerDay ?? '';
-        case 'sold': return r.units ?? '';
-        default: return r[k] ?? '';
-      }
-    });
-    return [r.itemName ?? `Type ${r.typeId}`, ...cells].map(escape).join(',');
-  });
+  // Raw values, not the display strings: a spreadsheet wants 1234567, not
+  // "1.23M".
+  const lines = rows.map((r) =>
+    [r.itemName ?? `Type ${r.typeId}`, ...columnKeys.map((k) => COLUMNS[k].value(r) ?? '')].map(escape).join(','),
+  );
 
   return [header.join(','), ...lines].join('\n');
 }
@@ -186,8 +200,11 @@ function FilterControls({ filters, params, setParams }) {
   ));
 }
 
+const sourceValue = (s, key) => (key === 'name' ? s.name ?? s.structureId : key === 'lastPolledAt' ? Date.parse(s.lastPolledAt) : s[key]);
+
 /** Poll status and SDE builds — a different shape from the item reports. */
 function HealthView({ data }) {
+  const sourceSort = useSort(data.rows, sourceValue);
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -215,14 +232,22 @@ function HealthView({ data }) {
           <Table>
             <TableHeader>
               <TableRow className="border-slate-800 hover:bg-transparent">
-                <TableHead className="text-slate-400">Source</TableHead>
-                <TableHead className="text-slate-400">Status</TableHead>
-                <TableHead className="text-slate-400">Last poll</TableHead>
-                <TableHead className="text-slate-400">Interval</TableHead>
+                <TableHead className="text-slate-400">
+                  <SortLabel sort={sourceSort} sortKey="name">Source</SortLabel>
+                </TableHead>
+                <TableHead className="text-slate-400">
+                  <SortLabel sort={sourceSort} sortKey="lastPollStatus">Status</SortLabel>
+                </TableHead>
+                <TableHead className="text-slate-400">
+                  <SortLabel sort={sourceSort} sortKey="lastPolledAt" first="desc">Last poll</SortLabel>
+                </TableHead>
+                <TableHead className="text-slate-400">
+                  <SortLabel sort={sourceSort} sortKey="pollIntervalMinutes">Interval</SortLabel>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.rows.map((s) => (
+              {sourceSort.rows.map((s) => (
                 <TableRow key={s.id} className="border-slate-800">
                   <TableCell className="text-slate-200">{s.name ?? s.structureId}</TableCell>
                   <TableCell>
@@ -284,6 +309,7 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
     setParams(defaults);
     setSearch('');
     setPickedItem(report.initialItem ?? null);
+    sort.reset();
   }, [report]);
 
   const { data, isLoading } = useQuery({
@@ -300,16 +326,22 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
 
   const columnKeys = report?.columns ?? [];
 
-  const rows = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const all = data?.rows ?? [];
     const term = debouncedSearch.trim().toLowerCase();
     if (!term) return all;
     return all.filter((r) => String(r.itemName ?? '').toLowerCase().includes(term));
   }, [data, debouncedSearch]);
 
+  // Column sorting is local: every report returns its full result set. With
+  // no column picked, rows keep the server's ranking.
+  const sort = useSort(filteredRows, sortValue);
+  const rows = sort.rows;
+
   const chartData = useMemo(
     () =>
-      rows.slice(0, 12).map((r) => ({
+      // The report's own top rows, whatever column the table is sorted by.
+      filteredRows.slice(0, 12).map((r) => ({
         name: (r.itemName ?? `#${r.typeId}`).slice(0, 18),
         // The report's headline number, charted for the top rows — named by
         // the report where it has one, otherwise the first field present.
@@ -322,7 +354,7 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
           r.sellVolume ??
           0,
       })),
-    [rows, report],
+    [filteredRows, report],
   );
 
   if (!report) return null;
@@ -331,8 +363,12 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#0D1829] border-[#1E2D45] max-w-5xl max-h-[88vh] overflow-y-auto scrollbar-thin">
-        <DialogHeader>
+      {/* Sized to the browser window rather than a fixed width, so wide reports
+          use the screen they have. The table takes whatever height is left and
+          scrolls on its own, keeping its header and horizontal scrollbar in
+          view instead of at the bottom of a long dialog. */}
+      <DialogContent className="flex flex-col w-[calc(100vw-1rem)] sm:w-[calc(100vw-3rem)] max-w-[1800px] max-h-[94vh] p-4 sm:p-6 bg-[#0D1829] border-[#1E2D45] overflow-y-auto scrollbar-thin">
+        <DialogHeader className="shrink-0 pr-6">
           <DialogTitle className="text-white">{report.title}</DialogTitle>
           <DialogDescription className="text-slate-400">{report.description}</DialogDescription>
         </DialogHeader>
@@ -351,12 +387,12 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
 
         {!isLoading && data && !isHealth && !isHistory && (
           <>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="shrink-0 flex flex-wrap items-center gap-2">
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Filter these results…"
-                className="flex-1 min-w-[200px] bg-slate-900 border-slate-800 text-slate-200"
+                className="flex-1 min-w-[180px] bg-slate-900 border-slate-800 text-slate-200"
               />
 
               {filterControls}
@@ -398,7 +434,7 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
               )}
             </div>
 
-            <div className="text-xs text-slate-500">
+            <div className="shrink-0 text-xs text-slate-500">
               {rows.length} row{rows.length === 1 ? '' : 's'}
               {data.summary?.estimatedCost != null && ` · est. ${formatISK(data.summary.estimatedCost)} to restock`}
               {data.summary?.iskTiedUp != null && ` · ${formatISK(data.summary.iskTiedUp)} tied up`}
@@ -414,7 +450,7 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
             </div>
 
             {chartData.length > 0 && (
-              <div className="h-44">
+              <div className="shrink-0 h-36 lg:h-44">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ bottom: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
@@ -427,17 +463,28 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
               </div>
             )}
 
-            <div className="border border-slate-800 rounded-lg overflow-x-auto">
-              <Table>
-                <TableHeader>
+            <div className="min-h-[14rem] border border-slate-800 rounded-lg overflow-auto scrollbar-thin">
+              <Table className="whitespace-nowrap">
+                <TableHeader className="sticky top-0 z-20 bg-[#0D1829] shadow-[0_1px_0_#1E293B]">
                   <TableRow className="border-slate-800 hover:bg-transparent">
-                    <TableHead className="text-slate-400 min-w-[180px]">Item</TableHead>
+                    {/* The item column stays pinned while the numbers scroll
+                        sideways, so a row never loses its name. */}
+                    <TableHead className="sticky left-0 z-10 bg-[#0D1829] text-slate-400 min-w-[160px]">
+                      <SortLabel sort={sort} sortKey="name">Item</SortLabel>
+                    </TableHead>
                     {columnKeys.map((k) => (
                       <TableHead
                         key={k}
-                        className={cn('text-slate-400', COLUMNS[k].align === 'right' && 'text-right')}
+                        className={cn('text-slate-400 px-3', COLUMNS[k].align === 'right' && 'text-right')}
                       >
-                        {COLUMNS[k].label}
+                        <SortLabel
+                          sort={sort}
+                          sortKey={k}
+                          first={COLUMNS[k].first ?? (COLUMNS[k].align === 'right' ? 'desc' : 'asc')}
+                          align={COLUMNS[k].align}
+                        >
+                          {COLUMNS[k].label}
+                        </SortLabel>
                       </TableHead>
                     ))}
                   </TableRow>
@@ -453,25 +500,27 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
                   {rows.map((r) => (
                     <TableRow
                       key={r.typeId}
-                      className={cn('border-slate-800', report.opensHistory && 'cursor-pointer hover:bg-slate-800/40')}
+                      className={cn('group border-slate-800', report.opensHistory && 'cursor-pointer hover:bg-slate-800/40')}
                       onClick={report.opensHistory ? () => onOpenItem?.({ typeId: r.typeId, name: r.itemName }, params) : undefined}
                       title={report.opensHistory ? 'Open item history' : undefined}
                     >
-                      <TableCell className="text-slate-200">
-                        <div className="flex items-center gap-2">
+                      <TableCell className="sticky left-0 z-10 bg-[#0D1829] text-slate-200 py-1.5">
+                        <div className="flex items-center gap-2 max-w-[240px] sm:max-w-[320px]">
                           <img
                             src={`https://images.evetech.net/types/${r.typeId}/icon?size=32`}
                             alt=""
-                            className="w-5 h-5 rounded"
+                            className="w-5 h-5 rounded shrink-0"
                             loading="lazy"
                           />
-                          <span className="truncate">{r.itemName ?? `Type ${r.typeId}`}</span>
+                          <span className="truncate" title={r.itemName ?? undefined}>
+                            {r.itemName ?? `Type ${r.typeId}`}
+                          </span>
                         </div>
                       </TableCell>
                       {columnKeys.map((k) => (
                         <TableCell
                           key={k}
-                          className={cn('text-slate-300 tnum', COLUMNS[k].align === 'right' && 'text-right')}
+                          className={cn('text-slate-300 tnum px-3 py-1.5', COLUMNS[k].align === 'right' && 'text-right')}
                         >
                           {COLUMNS[k].render(r)}
                         </TableCell>

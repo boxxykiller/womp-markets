@@ -8,34 +8,30 @@ import { TableToolbar } from '@/components/market/TableToolbar';
 import { ItemDetailSheet } from '@/components/market/ItemDetailSheet';
 import { Button } from '@/components/ui/button';
 import { useDebounced } from '@/hooks/useDebounced';
+import { useSortState } from '@/hooks/useSort';
 import { formatRelative } from '@/lib/format';
 
 const PAGE_SIZE = 100;
 
-const SORT_OPTIONS = [
-  { value: 'name', label: 'Name' },
-  { value: 'volume', label: 'Sold per day' },
-  { value: 'sellVolume', label: 'On market' },
-  { value: 'spread', label: 'vs Jita' },
-  { value: 'daysOfCover', label: 'Days left' },
-];
-
 export default function Browse() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState(null);
-  const [sort, setSort] = useState('name');
   const [page, setPage] = useState(0);
+  // Sorted server-side: the list is paginated, so sorting in the browser
+  // would only reorder the page on screen.
+  const sort = useSortState({ key: 'name', dir: 'asc' }, () => setPage(0));
   const [detailTypeId, setDetailTypeId] = useState(null);
 
   const debouncedSearch = useDebounced(search);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['browse', debouncedSearch, categoryId, sort, page],
+    queryKey: ['browse', debouncedSearch, categoryId, sort.key, sort.dir, page],
     queryFn: () =>
       api.invoke('getMarketBrowse', {
         search: debouncedSearch || undefined,
         marketGroupId: categoryId ?? undefined,
-        sort,
+        sort: sort.key,
+        sortDir: sort.dir,
         limit: PAGE_SIZE,
         skip: page * PAGE_SIZE,
       }),
@@ -85,15 +81,13 @@ export default function Browse() {
         categories={categoryData?.categories ?? []}
         categoryId={categoryId}
         onCategoryChange={changeFilter(setCategoryId)}
-        sort={sort}
-        onSortChange={changeFilter(setSort)}
-        sortOptions={SORT_OPTIONS}
       />
 
       <MarketTable
         rows={rows}
         isLoading={isLoading}
         onRowClick={(row) => setDetailTypeId(row.typeId)}
+        sort={sort}
         columns={['local', 'jita', 'spread', 'volume', 'cover']}
         emptyMessage={
           overview?.source

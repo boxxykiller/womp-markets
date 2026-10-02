@@ -7,7 +7,9 @@ import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { useAuth } from '@/hooks/useAuth';
+import { useSort } from '@/hooks/useSort';
 import { formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -216,6 +218,16 @@ function statusOf(c) {
   return { label: 'Active', cls: 'bg-emerald-500/20 text-emerald-400' };
 }
 
+function characterValue(c, key) {
+  switch (key) {
+    case 'corporation': return c.corporationName ?? c.corporationId;
+    case 'alliance': return c.allianceName ?? c.allianceId;
+    case 'status': return statusOf(c).label;
+    case 'lastLoginAt': return c.lastLoginAt ? Date.parse(c.lastLoginAt) : null;
+    default: return c.characterName;
+  }
+}
+
 export function UsersSection({ Section }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -242,6 +254,7 @@ export function UsersSection({ Section }) {
       [c.characterName, c.corporationName, c.allianceName].some((v) => v?.toLowerCase().includes(q)),
     );
   }, [data, search]);
+  const sort = useSort(characters, characterValue);
 
   const total = data?.characters?.length ?? 0;
   const busy = setRole.isPending || setBanned.isPending;
@@ -272,16 +285,26 @@ export function UsersSection({ Section }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-800">
-                <th className="py-2 pr-3 font-medium">Character</th>
-                <th className="py-2 pr-3 font-medium">Corporation</th>
-                <th className="py-2 pr-3 font-medium">Alliance</th>
-                <th className="py-2 pr-3 font-medium">Status</th>
-                <th className="py-2 pr-3 font-medium">Last login</th>
+                <th className="py-2 pr-3 font-medium">
+                  <SortLabel sort={sort} sortKey="name">Character</SortLabel>
+                </th>
+                <th className="py-2 pr-3 font-medium">
+                  <SortLabel sort={sort} sortKey="corporation">Corporation</SortLabel>
+                </th>
+                <th className="py-2 pr-3 font-medium">
+                  <SortLabel sort={sort} sortKey="alliance">Alliance</SortLabel>
+                </th>
+                <th className="py-2 pr-3 font-medium">
+                  <SortLabel sort={sort} sortKey="status">Status</SortLabel>
+                </th>
+                <th className="py-2 pr-3 font-medium">
+                  <SortLabel sort={sort} sortKey="lastLoginAt" first="desc">Last login</SortLabel>
+                </th>
                 <th className="py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {characters.map((c) => {
+              {sort.rows.map((c) => {
                 const status = statusOf(c);
                 const isSelf = c.characterId === user?.characterId;
                 const corpListed = policy?.allowedCorporationIds?.includes(c.corporationId);

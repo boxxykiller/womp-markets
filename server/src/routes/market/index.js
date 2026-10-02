@@ -218,29 +218,52 @@ function buildRow(typeId, { book, meta, reference, dailyByType, watch, now }) {
 }
 
 // Sorts that can't be pushed into SQL (they're computed from several sources)
-// are applied here, after the rows are built.
-const SORTERS = {
-  name: (a, b) => String(a.itemName || '').localeCompare(String(b.itemName || '')),
-  sellVolume: (a, b) => b.sellVolume - a.sellVolume,
-  buyVolume: (a, b) => b.buyVolume - a.buyVolume,
-  bestSell: (a, b) => (a.bestSell ?? Infinity) - (b.bestSell ?? Infinity),
-  bestBuy: (a, b) => (b.bestBuy ?? -Infinity) - (a.bestBuy ?? -Infinity),
-  volume: (a, b) => (b.avgDaily30 ?? -1) - (a.avgDaily30 ?? -1),
-  // Nulls (no data) sort last rather than first, so "soonest to run out"
-  // doesn't open with a screen of unknowns.
-  daysOfCover: (a, b) => (a.daysOfCover30 ?? Infinity) - (b.daysOfCover30 ?? Infinity),
-  spread: (a, b) => (b.vsJitaSellPct ?? -Infinity) - (a.vsJitaSellPct ?? -Infinity),
-  status: (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
+// are applied here, after the rows are built. Each field has a natural
+// direction used when none is asked for; `sortDir` (or a leading "-") picks
+// the other. Missing values sink to the bottom either way, so "soonest to run
+// out" doesn't open with a screen of unknowns.
+const STATUS_ORDER = ['out', 'critical', 'low', 'ok'];
+
+const SORT_FIELDS = {
+  name: ['asc', (r) => r.itemName],
+  status: ['asc', (r) => (r.status == null ? null : STATUS_ORDER.indexOf(r.status))],
+  min: ['desc', (r) => r.effectiveMin],
+  sellVolume: ['desc', (r) => r.sellVolume],
+  buyVolume: ['desc', (r) => r.buyVolume],
+  bestSell: ['asc', (r) => r.bestSell],
+  bestBuy: ['desc', (r) => r.bestBuy],
+  jitaSell: ['asc', (r) => r.jitaBestSell],
+  jitaBuy: ['desc', (r) => r.jitaBestBuy],
+  volume: ['desc', (r) => r.avgDaily30],
+  daysOfCover: ['asc', (r) => r.daysOfCover30],
+  spread: ['desc', (r) => r.vsJitaSellPct],
 };
 
-const STATUS_ORDER = ['out', 'critical', 'low', 'ok', null];
+const isMissing = (v) => v == null || (typeof v === 'number' && Number.isNaN(v));
 
-function applySort(rows, sort) {
-  const key = String(sort || 'name').replace(/^-/, '');
-  const desc = String(sort || '').startsWith('-');
-  const sorter = SORTERS[key] || SORTERS.name;
-  const sorted = [...rows].sort(sorter);
-  return desc ? sorted.reverse() : sorted;
+function compareValues(a, b) {
+  if (a === b) return 0;
+  if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : 1;
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function applySort(rows, sort, sortDir) {
+  const raw = String(sort || 'name');
+  const key = raw.replace(/^-/, '');
+  const [natural, get] = SORT_FIELDS[key] || SORT_FIELDS.name;
+  let dir = sortDir === 'asc' || sortDir === 'desc' ? sortDir : natural;
+  if (!sortDir && raw.startsWith('-')) dir = natural === 'asc' ? 'desc' : 'asc';
+  const sign = dir === 'desc' ? -1 : 1;
+
+  return rows
+    .map((row, i) => ({ row, i, v: get(row) }))
+    .sort((x, y) => {
+      const xm = isMissing(x.v);
+      const ym = isMissing(y.v);
+      if (xm || ym) return xm === ym ? x.i - y.i : xm ? 1 : -1;
+      return sign * compareValues(x.v, y.v) || x.i - y.i;
+    })
+    .map((x) => x.row);
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────
@@ -301,7 +324,7 @@ async function getMarketOverview({ structureId } = {}) {
   };
 }
 
-async function getMarketBrowse({ structureId, search, marketGroupId, sort, limit, skip, trackedOnly } = {}) {
+async function getMarketBrowse({ structureId, search, marketGroupId, sort, sortDir, limit, skip, trackedOnly } = {}) {
   const source = await resolveSource(structureId);
   if (!source) return { rows: [], total: 0, source: null };
 
@@ -340,7 +363,7 @@ async function getMarketBrowse({ structureId, search, marketGroupId, sort, limit
     }),
   );
 
-  rows = applySort(rows, sort);
+  rows = applySort(rows, sort, sortDir);
   return {
     rows: rows.slice(offset, offset + take),
     total: rows.length,
@@ -475,8 +498,8 @@ async function getMarketFeed({ structureId, limit = 100, eventType, eventTypes }
   };
 }
 
-async function getMarketWatchlist({ structureId, search, status, marketGroupId, sort } = {}) {
-  const result = await getMarketBrowse({ structureId, search, marketGroupId, sort: sort || 'status', trackedOnly: true, limit: MAX_BROWSE_LIMIT });
+async function getMarketWatchlist({ structureId, search, status, marketGroupId, sort, sortDir } = {}) {
+  const result = await getMarketBrowse({ structureId, search, marketGroupId, sort: sort || 'status', sortDir, trackedOnly: true, limit: MAX_BROWSE_LIMIT });
 
   const statuses = Array.isArray(status) ? status : status ? [status] : [];
   const rows = statuses.length > 0 ? result.rows.filter((r) => statuses.includes(r.status)) : result.rows;

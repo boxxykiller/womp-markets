@@ -15,15 +15,8 @@ import { EditableNumber } from '@/components/ui/EditableNumber';
 import { useAuth } from '@/hooks/useAuth';
 import { useCart } from '@/hooks/useCart';
 import { useDebounced } from '@/hooks/useDebounced';
+import { useSortState } from '@/hooks/useSort';
 import { stockedSummary } from '@/lib/format';
-
-const SORT_OPTIONS = [
-  { value: 'status', label: 'Status' },
-  { value: 'daysOfCover', label: 'Days left' },
-  { value: 'name', label: 'Name' },
-  { value: 'volume', label: 'Sold per day' },
-  { value: 'sellVolume', label: 'On market' },
-];
 
 export default function Tracked() {
   const { isAdmin } = useAuth();
@@ -33,7 +26,7 @@ export default function Tracked() {
   const [search, setSearch] = useState('');
   const [statuses, setStatuses] = useState([]);
   const [categoryId, setCategoryId] = useState(null);
-  const [sort, setSort] = useState('status');
+  const sort = useSortState({ key: 'status', dir: 'asc' });
   const [selected, setSelected] = useState([]);
   const [detailTypeId, setDetailTypeId] = useState(null);
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -41,13 +34,14 @@ export default function Tracked() {
   const debouncedSearch = useDebounced(search);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['watchlist', debouncedSearch, statuses, categoryId, sort],
+    queryKey: ['watchlist', debouncedSearch, statuses, categoryId, sort.key, sort.dir],
     queryFn: () =>
       api.invoke('getMarketWatchlist', {
         search: debouncedSearch || undefined,
         status: statuses.length ? statuses : undefined,
         marketGroupId: categoryId ?? undefined,
-        sort,
+        sort: sort.key,
+        sortDir: sort.dir,
       }),
     refetchInterval: 60_000,
   });
@@ -161,9 +155,6 @@ export default function Tracked() {
         categories={categoryData?.categories ?? []}
         categoryId={categoryId}
         onCategoryChange={setCategoryId}
-        sort={sort}
-        onSortChange={setSort}
-        sortOptions={SORT_OPTIONS}
       />
 
       {selected.length > 0 && (
@@ -199,6 +190,7 @@ export default function Tracked() {
         onToggleSelect={toggleSelect}
         onToggleAll={toggleAll}
         onRowClick={(row) => setDetailTypeId(row.typeId)}
+        sort={sort}
         columns={['status', ...(isAdmin ? [] : ['min']), 'local', 'jita', 'spread', 'volume', 'cover']}
         emptyMessage={
           isAdmin

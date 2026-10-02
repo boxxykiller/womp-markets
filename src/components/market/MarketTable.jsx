@@ -1,6 +1,7 @@
 import { Loader2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { SortLabel } from '@/components/ui/SortLabel';
 import { cn } from '@/lib/utils';
 import { STATUS_META, deltaClass, formatDays, formatISK, formatPct, formatQty, formatRate } from '@/lib/format';
 
@@ -15,7 +16,9 @@ export function StatusBadge({ status }) {
  *
  * One component for both so a column means the same thing on either page.
  * `columns` selects which of the shared set to show, and `selectable` turns
- * on the checkbox column that feeds the cart.
+ * on the checkbox column that feeds the cart. `sort` ({ key, dir, toggle })
+ * makes the headings clickable; the pages sort on the server, since Browse is
+ * paginated and a page-local sort would only reorder the hundred rows shown.
  */
 export function MarketTable({
   rows,
@@ -27,6 +30,7 @@ export function MarketTable({
   onToggleAll,
   onRowClick,
   rowActions,
+  sort,
   emptyMessage = 'No items match these filters.',
 }) {
   const show = (c) => columns.includes(c);
@@ -55,29 +59,59 @@ export function MarketTable({
                 <Checkbox checked={allSelected} onCheckedChange={onToggleAll} aria-label="Select all" />
               </TableHead>
             )}
-            <TableHead className="text-slate-400 min-w-[200px]">Item</TableHead>
-            {show('status') && <TableHead className="text-slate-400">Status</TableHead>}
-            {show('min') && <TableHead className="text-slate-400 text-right">Min</TableHead>}
+            <TableHead className="text-slate-400 min-w-[200px]">
+              <SortLabel sort={sort} sortKey="name">Item</SortLabel>
+            </TableHead>
+            {show('status') && (
+              <TableHead className="text-slate-400">
+                <SortLabel sort={sort} sortKey="status">Status</SortLabel>
+              </TableHead>
+            )}
+            {show('min') && (
+              <TableHead className="text-slate-400 text-right">
+                <SortLabel sort={sort} sortKey="min" first="desc" align="right">Min</SortLabel>
+              </TableHead>
+            )}
             {show('local') && (
               <>
-                <TableHead className="text-slate-400 text-right">Local buy</TableHead>
-                <TableHead className="text-slate-400 text-right">Local sell</TableHead>
+                <TableHead className="text-slate-400 text-right">
+                  <SortLabel sort={sort} sortKey="bestBuy" first="desc" align="right">Local buy</SortLabel>
+                </TableHead>
+                <TableHead className="text-slate-400 text-right">
+                  <SortLabel sort={sort} sortKey="bestSell" first="asc" align="right">Local sell</SortLabel>
+                </TableHead>
               </>
             )}
             {show('jita') && (
               <>
-                <TableHead className="text-slate-400 text-right">Jita buy</TableHead>
-                <TableHead className="text-slate-400 text-right">Jita sell</TableHead>
+                <TableHead className="text-slate-400 text-right">
+                  <SortLabel sort={sort} sortKey="jitaBuy" first="desc" align="right">Jita buy</SortLabel>
+                </TableHead>
+                <TableHead className="text-slate-400 text-right">
+                  <SortLabel sort={sort} sortKey="jitaSell" first="asc" align="right">Jita sell</SortLabel>
+                </TableHead>
               </>
             )}
-            {show('spread') && <TableHead className="text-slate-400 text-right">vs Jita</TableHead>}
+            {show('spread') && (
+              <TableHead className="text-slate-400 text-right">
+                <SortLabel sort={sort} sortKey="spread" first="desc" align="right">vs Jita</SortLabel>
+              </TableHead>
+            )}
             {show('volume') && (
               <>
-                <TableHead className="text-slate-400 text-right">On market</TableHead>
-                <TableHead className="text-slate-400 text-right">Sold/day</TableHead>
+                <TableHead className="text-slate-400 text-right">
+                  <SortLabel sort={sort} sortKey="sellVolume" first="desc" align="right">On market</SortLabel>
+                </TableHead>
+                <TableHead className="text-slate-400 text-right">
+                  <SortLabel sort={sort} sortKey="volume" first="desc" align="right">Sold/day</SortLabel>
+                </TableHead>
               </>
             )}
-            {show('cover') && <TableHead className="text-slate-400 text-right">Days left</TableHead>}
+            {show('cover') && (
+              <TableHead className="text-slate-400 text-right">
+                <SortLabel sort={sort} sortKey="daysOfCover" first="asc" align="right">Days left</SortLabel>
+              </TableHead>
+            )}
             {rowActions && <TableHead className="w-10" />}
           </TableRow>
         </TableHeader>
