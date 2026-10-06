@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts';
-import { Copy, Loader2, ShoppingCart } from 'lucide-react';
+import { Copy, History, Loader2, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { SortLabel } from '@/components/ui/SortLabel';
 import { StatusBadge } from './MarketTable';
 import { ItemHistoryView, VerdictBadge } from './ItemHistoryView';
+import { ItemDetailSheet } from './ItemDetailSheet';
 import { useCart } from '@/hooks/useCart';
 import { useDebounced } from '@/hooks/useDebounced';
 import { useSort } from '@/hooks/useSort';
@@ -296,6 +297,7 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
   const [search, setSearch] = useState('');
   const [params, setParams] = useState({});
   const [pickedItem, setPickedItem] = useState(null);
+  const [detailTypeId, setDetailTypeId] = useState(null);
   const debouncedSearch = useDebounced(search);
   const isHistory = report?.kind === 'history';
 
@@ -500,9 +502,9 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
                   {rows.map((r) => (
                     <TableRow
                       key={r.typeId}
-                      className={cn('group border-slate-800', report.opensHistory && 'cursor-pointer hover:bg-slate-800/40')}
-                      onClick={report.opensHistory ? () => onOpenItem?.({ typeId: r.typeId, name: r.itemName }, params) : undefined}
-                      title={report.opensHistory ? 'Open item history' : undefined}
+                      className="group border-slate-800 cursor-pointer hover:bg-slate-800/40"
+                      onClick={() => setDetailTypeId(r.typeId)}
+                      title="Open item details"
                     >
                       <TableCell className="sticky left-0 z-10 bg-[#0D1829] text-slate-200 py-1.5">
                         <div className="flex items-center gap-2 max-w-[240px] sm:max-w-[320px]">
@@ -514,6 +516,39 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
                           />
                           <span className="truncate" title={r.itemName ?? undefined}>
                             {r.itemName ?? `Type ${r.typeId}`}
+                          </span>
+                          <span className="ml-auto flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            {report.opensHistory && (
+                              <button
+                                onClick={() => onOpenItem?.({ typeId: r.typeId, name: r.itemName }, params)}
+                                className="p-0.5 text-slate-500 hover:text-[#4A9EFF]"
+                                title="Open item history"
+                                aria-label="Open item history"
+                              >
+                                <History className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                addItems([
+                                  {
+                                    typeId: r.typeId,
+                                    itemName: r.itemName,
+                                    quantity: r.restockQuantity > 0 ? r.restockQuantity : 1,
+                                    jitaBestSell: r.jitaBestSell,
+                                    jitaBestBuy: r.jitaBestBuy,
+                                    volumePerUnit: r.volumePerUnit,
+                                    bestSell: r.bestSell,
+                                  },
+                                ]);
+                                toast.success(`Added ${r.itemName ?? 'item'} to restock list`);
+                              }}
+                              className="p-0.5 text-slate-500 hover:text-[#4A9EFF]"
+                              title="Add to restock list"
+                              aria-label="Add to restock list"
+                            >
+                              <ShoppingCart className="w-3.5 h-3.5" />
+                            </button>
                           </span>
                         </div>
                       </TableCell>
@@ -533,6 +568,7 @@ export function ReportDialog({ report, open, onOpenChange, onOpenItem }) {
           </>
         )}
       </DialogContent>
+      <ItemDetailSheet typeId={detailTypeId} open={!!detailTypeId} onOpenChange={(v) => !v && setDetailTypeId(null)} />
     </Dialog>
   );
 }

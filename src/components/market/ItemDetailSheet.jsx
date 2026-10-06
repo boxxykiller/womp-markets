@@ -10,7 +10,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShoppingCart } from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { useCart } from '@/hooks/useCart';
 import { api } from '@/api/client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
@@ -66,6 +69,7 @@ function Ladder({ levels, isBuy }) {
 }
 
 export function ItemDetailSheet({ typeId, open, onOpenChange }) {
+  const { addItems, has } = useCart();
   const { data, isLoading } = useQuery({
     queryKey: ['market-item', typeId],
     queryFn: () => api.invoke('getMarketItem', { typeId, days: 90 }),
@@ -104,6 +108,28 @@ export function ItemDetailSheet({ typeId, open, onOpenChange }) {
             </SheetHeader>
 
             <div className="mt-5 space-y-6">
+              <Button
+                size="sm"
+                onClick={() => {
+                  addItems([
+                    {
+                      typeId: item.typeId ?? typeId,
+                      itemName: item.itemName,
+                      quantity: item.restockQuantity > 0 ? item.restockQuantity : 1,
+                      jitaBestSell: item.jitaBestSell,
+                      jitaBestBuy: item.jitaBestBuy,
+                      volumePerUnit: item.volumePerUnit,
+                      bestSell: item.bestSell,
+                    },
+                  ]);
+                  toast.success(`Added ${item.itemName ?? 'item'} to restock list`);
+                }}
+                className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white"
+              >
+                <ShoppingCart className="w-4 h-4 mr-2" />
+                {has(item.typeId ?? typeId) ? 'Update restock quantity' : 'Add to restock'}
+              </Button>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-900/50 border border-slate-800">
                 <Stat label="Local sell" value={formatISK(item.bestSell)} className="text-emerald-400" />
                 <Stat label="Local buy" value={formatISK(item.bestBuy)} className="text-rose-400" />
