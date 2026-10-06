@@ -223,8 +223,12 @@ export default function Dashboard() {
                   <span className="text-slate-200 truncate">{m.itemName ?? `Type ${m.typeId}`}</span>
                 </div>
                 <div className="flex items-center gap-6 shrink-0 tnum">
-                  <span className="text-slate-400">{Math.round(m.unitsPerDay).toLocaleString()}/day</span>
-                  <span className="text-emerald-400">{formatISK(m.isk)}</span>
+                  <span className="text-slate-400" title={`${Math.round(m.units).toLocaleString()} units in 7 days`}>
+                    {Math.round(m.unitsPerDay).toLocaleString()}/day
+                  </span>
+                  <span className="text-emerald-400" title={`${formatISK(m.isk)} ISK in 7 days`}>
+                    {formatISK(m.isk / 7)}/day
+                  </span>
                 </div>
               </button>
             ))}
