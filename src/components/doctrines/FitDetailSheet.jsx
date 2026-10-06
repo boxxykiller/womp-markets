@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import { formatISK, formatISKFull, formatQty } from '@/lib/format';
 import { formatMultibuy } from '@/lib/multibuy';
 import { sortRows } from '@/lib/sort';
-import { KIND_LABELS, ROLES, ROLE_META, RoleBadge, toCartItems } from './shared';
+import { KIND_LABELS, ROLES, ROLE_META, RoleBadge, fullCartItems, toCartItems } from './shared';
 
 function Stat({ label, value, className, title }) {
   return (
@@ -70,6 +70,12 @@ export function FitDetailSheet({ fit, doctrine, open, onOpenChange, isAdmin, onC
     toast.success(`Added ${missing.length} item${missing.length === 1 ? '' : 's'} to restock list`);
   }
 
+  function addAllToCart() {
+    const items = fullCartItems([fit]);
+    addItems(items);
+    toast.success(`Added ${items.length} item${items.length === 1 ? '' : 's'} (full fit) to restock list`);
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl bg-[#0B1220] border-[#1E2D45] overflow-y-auto scrollbar-thin">
@@ -109,11 +115,15 @@ export function FitDetailSheet({ fit, doctrine, open, onOpenChange, isAdmin, onC
               <ClipboardCopy className="w-4 h-4 mr-1" />
               Copy fit (EFT)
             </Button>
+            <Button size="sm" variant="outline" onClick={addAllToCart} className="border-slate-700 text-slate-300">
+              <ShoppingCart className="w-4 h-4 mr-1" />
+              Buy all (full fit)
+            </Button>
             {missing.length > 0 && (
               <>
                 <Button size="sm" onClick={addMissingToCart} className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white">
                   <ShoppingCart className="w-4 h-4 mr-1" />
-                  Add missing to restock
+                  Buy missing
                 </Button>
                 <Button
                   size="sm"

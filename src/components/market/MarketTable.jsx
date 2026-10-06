@@ -34,7 +34,7 @@ export function MarketTable({
   emptyMessage = 'No items match these filters.',
 }) {
   const show = (c) => columns.includes(c);
-  const allSelected = rows.length > 0 && selectedIds.length === rows.length;
+  const allSelected = rows.length > 0 && rows.every((r) => selectedIds.includes(r.typeId));
 
   // Header cell count, so loading and empty states span the full width.
   const colSpan =

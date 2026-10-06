@@ -34,5 +34,10 @@ export function useSortState(initial = { key: null, dir: 'asc' }, onChange) {
       setState((s) => nextSort(s, key, first, initial));
       onChange?.();
     },
+    // Jump straight to a key and direction, for a sort dropdown.
+    set: (key, dir) => {
+      setState({ key, dir });
+      onChange?.();
+    },
   };
 }

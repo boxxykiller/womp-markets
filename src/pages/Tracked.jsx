@@ -17,10 +17,35 @@ import { useCart } from '@/hooks/useCart';
 import { useDebounced } from '@/hooks/useDebounced';
 import { useSortState } from '@/hooks/useSort';
 import { stockedSummary } from '@/lib/format';
+import { cn } from '@/lib/utils';
+
+const SORT_OPTIONS = [
+  { value: 'status:asc', label: 'Status: worst first' },
+  { value: 'name:asc', label: 'Name: A → Z' },
+  { value: 'name:desc', label: 'Name: Z → A' },
+  { value: 'daysOfCover:asc', label: 'Days left: soonest out' },
+  { value: 'daysOfCover:desc', label: 'Days left: longest' },
+  { value: 'sellVolume:asc', label: 'On market: fewest' },
+  { value: 'sellVolume:desc', label: 'On market: most' },
+  { value: 'volume:desc', label: 'Sold/day: highest' },
+  { value: 'min:desc', label: 'Minimum: highest' },
+  { value: 'bestSell:asc', label: 'Local sell: cheapest' },
+  { value: 'bestSell:desc', label: 'Local sell: priciest' },
+  { value: 'spread:desc', label: 'vs Jita: highest markup' },
+  { value: 'spread:asc', label: 'vs Jita: lowest markup' },
+];
+
+// Extra filters applied in the browser; the list is capped, not paginated.
+const EXTRA_FILTERS = [
+  { key: 'restock', label: 'Needs restock', test: (r) => (r.restockQuantity ?? 0) > 0 },
+  { key: 'selling', label: 'Selling', test: (r) => (r.avgDaily30 ?? 0) > 0 },
+  { key: 'belowJita', label: 'Below Jita', test: (r) => r.vsJitaSellPct != null && r.vsJitaSellPct < 0 },
+  { key: 'inCart', label: 'Not in restock list', test: null },
+];
 
 export default function Tracked() {
   const { isAdmin } = useAuth();
-  const { addItems } = useCart();
+  const { addItems, has } = useCart();
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState('');
@@ -30,6 +55,7 @@ export default function Tracked() {
   const [selected, setSelected] = useState([]);
   const [detailTypeId, setDetailTypeId] = useState(null);
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [extra, setExtra] = useState([]);
 
   const debouncedSearch = useDebounced(search);
 
@@ -52,7 +78,14 @@ export default function Tracked() {
     staleTime: 10 * 60_000,
   });
 
-  const rows = data?.rows ?? [];
+  const allRows = data?.rows ?? [];
+  const rows = useMemo(
+    () =>
+      allRows.filter((r) =>
+        extra.every((key) => (key === 'inCart' ? !has(r.typeId) : EXTRA_FILTERS.find((f) => f.key === key).test(r))),
+      ),
+    [allRows, extra, has],
+  );
   const counts = data?.counts ?? { out: 0, critical: 0, low: 0, ok: 0 };
 
   const stocked = stockedSummary(counts);
@@ -155,6 +188,33 @@ export default function Tracked() {
         categories={categoryData?.categories ?? []}
         categoryId={categoryId}
         onCategoryChange={setCategoryId}
+        sort={sort.key ? `${sort.key}:${sort.dir}` : undefined}
+        onSortChange={(v) => {
+          const [key, dir] = v.split(':');
+          sort.set(key, dir);
+        }}
+        sortOptions={SORT_OPTIONS}
+        right={
+          <div className="flex items-center gap-1">
+            {EXTRA_FILTERS.map((f) => {
+              const active = extra.includes(f.key);
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => setExtra((prev) => (active ? prev.filter((k) => k !== f.key) : [...prev, f.key]))}
+                  className={cn(
+                    'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                    active
+                      ? 'bg-[#4A9EFF]/20 text-[#4A9EFF] border-[#4A9EFF]/30'
+                      : 'border-slate-800 text-slate-500 hover:text-slate-300 hover:border-slate-700',
+                  )}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+        }
       />
 
       {selected.length > 0 && (

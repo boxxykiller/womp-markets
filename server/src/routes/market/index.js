@@ -78,6 +78,7 @@ async function filterTypeIds(typeIds, { search, marketGroupId }) {
   if (!search && !marketGroupId) return typeIds;
 
   const keys = typeIds.map(String);
+  const groupIds = marketGroupId ? await descendantGroupIds(marketGroupId) : null;
   const term = search ? `%${String(search).trim()}%` : null;
 
   const rows = await prisma.$queryRaw`
@@ -85,9 +86,32 @@ async function filterTypeIds(typeIds, { search, marketGroupId }) {
     WHERE "dataset" = 'types'
       AND "key" = ANY(${keys}::text[])
       AND (${term}::text IS NULL OR ("data"->'name'->>'en') ILIKE ${term})
-      AND (${marketGroupId ?? null}::int IS NULL OR ("data"->>'marketGroupID')::int = ${marketGroupId ?? null}::int)
+      AND (${groupIds}::int[] IS NULL OR ("data"->>'marketGroupID')::int = ANY(${groupIds}::int[]))
   `;
   return rows.map((r) => Number(r.key));
+}
+
+// A market group plus every group beneath it, so picking "Ships" in the
+// browser returns frigates and cruisers too, as the in-game browser does.
+async function loadMarketGroups() {
+  const rows = await prisma.$queryRaw`
+    SELECT "key" AS id, "data"->'name'->>'en' AS name, "data"->>'parentGroupID' AS parent
+    FROM "SdeRecord" WHERE "dataset" = 'marketGroups'
+  `;
+  return rows.map((r) => ({ id: Number(r.id), name: r.name, parentId: r.parent ? Number(r.parent) : null }));
+}
+
+async function descendantGroupIds(rootId) {
+  const groups = await loadMarketGroups();
+  const children = new Map();
+  for (const g of groups) {
+    if (g.parentId == null) continue;
+    if (!children.has(g.parentId)) children.set(g.parentId, []);
+    children.get(g.parentId).push(g.id);
+  }
+  const out = [Number(rootId)];
+  for (let i = 0; i < out.length; i++) out.push(...(children.get(out[i]) ?? []));
+  return out;
 }
 
 async function getDistinctListedTypeIds(structureId) {
@@ -389,7 +413,31 @@ async function getMarketCategories({ structureId } = {}) {
     GROUP BY mg."key", name
     ORDER BY name
   `;
-  return { categories: rows.map((r) => ({ id: Number(r.id), name: r.name, itemCount: r.item_count })) };
+  const categories = rows.map((r) => ({ id: Number(r.id), name: r.name, itemCount: r.item_count }));
+
+  // The full tree down to every listed group, for the sidebar browser. Only
+  // ancestors of listed groups are kept, and itemCount rolls up the subtree.
+  const all = await loadMarketGroups();
+  const byId = new Map(all.map((g) => [g.id, { ...g, itemCount: 0 }]));
+  const keep = new Set();
+  for (const c of categories) {
+    let node = byId.get(c.id);
+    if (node) node.itemCount += c.itemCount;
+    while (node && !keep.has(node.id)) {
+      keep.add(node.id);
+      node = byId.get(node.parentId);
+    }
+  }
+  // Roll direct counts up to ancestors.
+  for (const c of categories) {
+    let node = byId.get(byId.get(c.id)?.parentId);
+    while (node) {
+      node.itemCount += c.itemCount;
+      node = byId.get(node.parentId);
+    }
+  }
+  const groups = [...keep].map((id) => byId.get(id)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return { categories, groups };
 }
 
 async function getMarketItem({ structureId, typeId, days = 90 } = {}) {

@@ -64,3 +64,21 @@ export function toCartItems(missing) {
       bestSell: m.localPrice,
     }));
 }
+
+/**
+ * Cart lines for the whole of a fit or doctrine at its minimum, whatever is
+ * already on the market. `fits` is a list of fits; a part shared between
+ * fits is summed into one line.
+ */
+export function fullCartItems(fits) {
+  const byType = new Map();
+  for (const fit of fits) {
+    for (const i of fit.items ?? []) {
+      if (!(i.needed > 0)) continue;
+      const existing = byType.get(i.typeId);
+      if (existing) existing.quantity += i.needed;
+      else byType.set(i.typeId, { typeId: i.typeId, itemName: i.name, quantity: i.needed, jitaBestSell: i.jitaPrice, bestSell: i.localPrice });
+    }
+  }
+  return [...byType.values()];
+}

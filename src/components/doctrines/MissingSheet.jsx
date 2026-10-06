@@ -15,7 +15,7 @@ const missingValue = (m, key) => (key === 'cost' ? (m.jitaPrice != null ? m.jita
  * The shopping list for a doctrine (or every doctrine at once): each part
  * short of the combined demand of its fits, with what it costs in Jita.
  */
-export function MissingSheet({ open, onOpenChange, title, subtitle, missing = [], totalCost }) {
+export function MissingSheet({ open, onOpenChange, title, subtitle, missing = [], totalCost, onBuyAll }) {
   const { addItems } = useCart();
   const sort = useSort(missing, missingValue);
 
@@ -58,8 +58,14 @@ export function MissingSheet({ open, onOpenChange, title, subtitle, missing = []
                 </div>
                 <Button size="sm" onClick={addToCart} className="bg-[#4A9EFF] hover:bg-[#3A8EEF] text-white">
                   <ShoppingCart className="w-4 h-4 mr-1" />
-                  Add all to restock
+                  Buy missing
                 </Button>
+                {onBuyAll && (
+                  <Button size="sm" variant="outline" onClick={onBuyAll} className="border-slate-700 text-slate-300">
+                    <ShoppingCart className="w-4 h-4 mr-1" />
+                    Buy all
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={copyMultibuy} className="border-slate-700 text-slate-300">
                   <ClipboardCopy className="w-4 h-4 mr-1" />
                   Copy multibuy

@@ -15,7 +15,8 @@ import { DoctrineDialog } from '@/components/doctrines/DoctrineDialog';
 import { FitImportDialog } from '@/components/doctrines/FitImportDialog';
 import { FitDetailSheet } from '@/components/doctrines/FitDetailSheet';
 import { MissingSheet } from '@/components/doctrines/MissingSheet';
-import { ReadyBar, RoleBadge, ShipIcon, StatusDot } from '@/components/doctrines/shared';
+import { ReadyBar, RoleBadge, ShipIcon, StatusDot, fullCartItems, toCartItems } from '@/components/doctrines/shared';
+import { useCart } from '@/hooks/useCart';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 import { formatISK, formatISKFull, formatQty, formatRelative } from '@/lib/format';
@@ -32,11 +33,41 @@ function readCollapsed() {
   }
 }
 
-function FitRow({ fit, onClick }) {
+function CartButtons({ onBuyMissing, onBuyAll, hasMissing, label }) {
   return (
+    <div className="flex items-center gap-1 shrink-0">
+      {hasMissing && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onBuyMissing}
+          title={`Add what is missing for ${label} to the restock list`}
+          className="h-7 px-2 border-slate-700 text-slate-300"
+        >
+          <ShoppingCart className="w-3.5 h-3.5 sm:mr-1" />
+          <span className="hidden sm:inline">Buy missing</span>
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onBuyAll}
+        title={`Add all of ${label} to the restock list, whatever is on the market`}
+        className="h-7 px-2 border-slate-700 text-slate-300"
+      >
+        <ShoppingCart className="w-3.5 h-3.5 sm:mr-1" />
+        <span className="hidden sm:inline">Buy all</span>
+      </Button>
+    </div>
+  );
+}
+
+function FitRow({ fit, onClick, onBuyMissing, onBuyAll }) {
+  return (
+    <div className="flex items-center hover:bg-[#1E2D45]/40 transition-colors pr-3">
     <button
       onClick={onClick}
-      className="w-full grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto_7rem_auto] items-center gap-x-3 px-4 py-2 text-left hover:bg-[#1E2D45]/40 transition-colors"
+      className="flex-1 min-w-0 grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto_7rem_auto] items-center gap-x-3 px-4 py-2 text-left"
     >
       <ShipIcon typeId={fit.shipTypeId} size={32} />
       <div className="min-w-0">
@@ -66,10 +97,12 @@ function FitRow({ fit, onClick }) {
       <ReadyBar value={fit.fittable} max={fit.min} status={fit.status} className="hidden sm:block" />
       <span className="hidden sm:inline-flex"><StatusDot status={fit.status} /></span>
     </button>
+    <CartButtons hasMissing={fit.missingItems > 0} onBuyMissing={onBuyMissing} onBuyAll={onBuyAll} label={fit.name} />
+    </div>
   );
 }
 
-function DoctrineCard({ doctrine, collapsed, onToggle, isAdmin, onOpenFit, onShowMissing, onAddFits, onEdit, onDelete, onSetMin }) {
+function DoctrineCard({ doctrine, collapsed, onToggle, isAdmin, onOpenFit, onShowMissing, onAddFits, onEdit, onDelete, onSetMin, onBuyMissing, onBuyAll, onFitBuyMissing, onFitBuyAll }) {
   const pct = doctrine.coverage != null ? Math.floor(doctrine.coverage * 100) : null;
 
   return (
@@ -133,7 +166,7 @@ function DoctrineCard({ doctrine, collapsed, onToggle, isAdmin, onOpenFit, onSho
           {doctrine.fits.length > 0 && (
             <div className="border-t border-[#1E2D45]/70 divide-y divide-[#1E2D45]/50">
               {doctrine.fits.map((fit) => (
-                <FitRow key={fit.id} fit={fit} onClick={() => onOpenFit(fit.id)} />
+                <FitRow key={fit.id} fit={fit} onClick={() => onOpenFit(fit.id)} onBuyMissing={() => onFitBuyMissing(fit)} onBuyAll={() => onFitBuyAll(fit)} />
               ))}
             </div>
           )}
@@ -153,6 +186,9 @@ function DoctrineCard({ doctrine, collapsed, onToggle, isAdmin, onOpenFit, onSho
               <span className="text-xs text-slate-500">{isAdmin ? 'Paste some fits to get started.' : 'No fits added yet.'}</span>
             )}
             <div className="flex-1" />
+            {doctrine.fits.length > 0 && (
+              <CartButtons hasMissing={doctrine.missing.length > 0} onBuyMissing={onBuyMissing} onBuyAll={onBuyAll} label={doctrine.name} />
+            )}
             {isAdmin && (
               <Button size="sm" variant="outline" onClick={onAddFits} className="h-7 border-slate-700 text-slate-300">
                 <ClipboardPaste className="w-3.5 h-3.5 mr-1" />
@@ -169,6 +205,7 @@ function DoctrineCard({ doctrine, collapsed, onToggle, isAdmin, onOpenFit, onSho
 export default function Doctrines() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
+  const { addItems } = useCart();
 
   const [search, setSearch] = useState('');
   const [notReadyOnly, setNotReadyOnly] = useState(false);
@@ -257,6 +294,19 @@ export default function Doctrines() {
     totals.withFits === 0 ? 'slate' : totals.ready === totals.withFits ? 'emerald' : totals.ready > 0 ? 'amber' : 'rose';
   const fitsPct = totals.fitsTotal ? totals.fitsReady / totals.fitsTotal : null;
 
+  function addToCart(items, what) {
+    if (items.length === 0) {
+      toast.info('Nothing to add');
+      return;
+    }
+    addItems(items);
+    toast.success(`Added ${items.length} item${items.length === 1 ? '' : 's'} (${what}) to restock list`);
+  }
+
+  // Search narrows a doctrine's visible fits, but buying acts on the whole
+  // doctrine, so look it up unfiltered.
+  const fullDoctrine = (d) => doctrines.find((x) => x.id === d.id) ?? d;
+
   function toggleCollapsed(id) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -292,6 +342,16 @@ export default function Doctrines() {
           <Button variant="outline" onClick={() => setMissingFor('all')} className="border-slate-700 text-slate-300">
             <ShoppingCart className="w-4 h-4 mr-2" />
             Everything missing
+          </Button>
+        )}
+        {doctrines.some((d) => d.fits.length > 0) && (
+          <Button
+            variant="outline"
+            onClick={() => addToCart(fullCartItems(doctrines.flatMap((d) => d.fits)), 'every doctrine in full')}
+            className="border-slate-700 text-slate-300"
+          >
+            <ShoppingCart className="w-4 h-4 mr-2" />
+            Buy all doctrines
           </Button>
         )}
         {isAdmin && (
@@ -421,6 +481,10 @@ export default function Doctrines() {
               }
             }}
             onSetMin={(minQuantity) => saveMin.mutate({ doctrine, minQuantity })}
+            onBuyMissing={() => addToCart(toCartItems(fullDoctrine(doctrine).missing), `${doctrine.name} missing`)}
+            onBuyAll={() => addToCart(fullCartItems(fullDoctrine(doctrine).fits), `full ${doctrine.name}`)}
+            onFitBuyMissing={(fit) => addToCart(toCartItems(fit.items.filter((i) => i.missing > 0)), `${fit.name} missing`)}
+            onFitBuyAll={(fit) => addToCart(fullCartItems([fit]), `full ${fit.name}`)}
           />
         ))}
       </div>
@@ -469,6 +533,12 @@ export default function Doctrines() {
         }
         missing={missingFor === 'all' ? data?.allMissing : missingDoctrine?.missing}
         totalCost={missingFor === 'all' ? data?.allMissingCostJita : missingDoctrine?.missingCostJita}
+        onBuyAll={() =>
+          addToCart(
+            fullCartItems(missingFor === 'all' ? doctrines.flatMap((d) => d.fits) : (missingDoctrine?.fits ?? [])),
+            missingFor === 'all' ? 'every doctrine in full' : `full ${missingDoctrine?.name}`,
+          )
+        }
       />
     </Page>
   );
