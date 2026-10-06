@@ -144,7 +144,7 @@ export default function Browse() {
         </div>
       )}
 
-      <div className="flex flex-col-reverse lg:flex-row gap-4 items-start">
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
         <div className="min-w-0 flex-1 w-full">
           <MarketTable
             rows={rows}
@@ -205,8 +205,8 @@ export default function Browse() {
           )}
         </div>
 
-        {/* Market groups sit on the right, as in the in-game browser. */}
-        <aside className="w-full lg:w-72 shrink-0 lg:sticky lg:top-4">
+        {/* Market groups sit beside the table, as in the in-game browser. */}
+        <aside className="w-full lg:w-72 shrink-0 lg:sticky lg:top-4 order-first">
           <div className="text-[11px] uppercase tracking-wide text-[#4A7BA7] mb-1.5">Market groups</div>
           <CategoryTree
             groups={categoryData?.groups ?? []}
